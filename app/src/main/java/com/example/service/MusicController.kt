@@ -228,9 +228,17 @@ fun SongEntity.toMediaItem(): MediaItem {
         .setArtworkUri(albumArtPath?.let { Uri.parse(it) })
         .build()
 
+    val uri = if (isDownloaded && !localDownloadPath.isNullOrEmpty()) {
+        localDownloadPath
+    } else if (isOnline && !downloadUrl.isNullOrEmpty()) {
+        downloadUrl
+    } else {
+        filePath
+    }
+
     return MediaItem.Builder()
-        .setMediaId(filePath)
-        .setUri(filePath)
+        .setMediaId(filePath) // Use filePath/ID as unique identifier
+        .setUri(uri) // Use download URL or local file path
         .setMediaMetadata(metadata)
         .build()
 }

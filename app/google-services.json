@@ -1,0 +1,40 @@
+{
+  "project_info": {
+    "project_number": "348867381893",
+    "firebase_url": "https://ddmk-4d04f-default-rtdb.firebaseio.com",
+    "project_id": "ddmk-4d04f",
+    "storage_bucket": "ddmk-4d04f.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:348867381893:android:4925ae1a6634456db077ec",
+        "android_client_info": {
+          "package_name": "com.aistudio.musicplayer.jkrx"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "348867381893-kf50iaqep3og3fr2le0g69p1e3i3lnb1.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBH9rg-bPJfLvv9NcgcXwQwBhGzfqujxos"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "348867381893-kf50iaqep3og3fr2le0g69p1e3i3lnb1.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

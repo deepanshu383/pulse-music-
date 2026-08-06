@@ -26,7 +26,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val db = Room.databaseBuilder(
         application,
         AppDatabase::class.java, "pulse_music_db"
-    ).build()
+    ).fallbackToDestructiveMigration().build()
 
     private val userPreferences = UserPreferencesRepository(application)
     val folderUri = userPreferences.folderUriFlow.stateIn(
@@ -45,6 +45,51 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         initialValue = emptyList()
     )
 
+    private val jioSaavnRepository = com.example.data.repository.JioSaavnRepository()
+
+    private val _onlineSearchResults = MutableStateFlow<List<com.example.data.local.SongEntity>>(emptyList())
+    val onlineSearchResults = _onlineSearchResults.asStateFlow()
+
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery = _searchQuery.asStateFlow()
+    
+    val localSearchResults = combine(repository.cachedSongs, _searchQuery) { songs, query ->
+        if (query.isBlank()) emptyList()
+        else songs.filter { 
+            it.title.contains(query, ignoreCase = true) || 
+            it.artist.contains(query, ignoreCase = true)
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    fun updateSearchQuery(query: String) {
+        _searchQuery.value = query
+        if (query.isNotBlank()) {
+            viewModelScope.launch {
+                val result = jioSaavnRepository.searchSongs(query)
+                if (result.isSuccess) {
+                    val apiSongs = result.getOrNull() ?: emptyList()
+                    val mappedSongs = apiSongs.map { apiSong ->
+                        com.example.data.local.SongEntity(
+                            filePath = apiSong.id, // Using ID as filePath for online songs
+                            title = apiSong.name,
+                            artist = apiSong.primaryArtists ?: "Unknown Artist",
+                            album = apiSong.album?.name ?: "Unknown Album",
+                            duration = apiSong.duration?.toLongOrNull()?.let { it * 1000 } ?: 0L, // Usually in seconds
+                            albumArtPath = apiSong.image?.lastOrNull()?.url, // Get highest quality image
+                            isOnline = true,
+                            downloadUrl = apiSong.downloadUrl?.lastOrNull()?.url
+                        )
+                    }
+                    _onlineSearchResults.value = mappedSongs
+                } else {
+                    _onlineSearchResults.value = emptyList()
+                }
+            }
+        } else {
+            _onlineSearchResults.value = emptyList()
+        }
+    }
+
     val musicController = MusicController(application)
 
     init {
@@ -61,6 +106,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
         }
         
+        var lastFetchedSongId: String? = null
         viewModelScope.launch {
             musicController.playbackState.collect { state ->
                 if (playlistPrefs.isSaveQueueEnabled()) {
@@ -71,6 +117,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     }
                     playlistPrefs.saveQueue(qIds)
                     state.currentSongId?.let { playlistPrefs.saveLastPlayedSongId(it) }
+                }
+                
+                // Fetch Phase 4 data if the song changed
+                if (state.currentSongId != null && state.currentSongId != lastFetchedSongId) {
+                    lastFetchedSongId = state.currentSongId
+                    viewModelScope.launch {
+                        val allSongs = repository.cachedSongs.first()
+                        allSongs.find { it.filePath == state.currentSongId }?.let { currentSong ->
+                            fetchLyrics(currentSong)
+                            fetchRecommendations(currentSong)
+                        }
+                    }
                 }
             }
         }
@@ -103,10 +161,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun playSong(song: SongEntity, allSongs: List<SongEntity> = emptyList()) {
         val autoAdd = playlistPrefs.isAutoAddEnabled()
         musicController.playSong(song, allSongs, autoAdd)
+        
+        // Fetch Phase 4 data
+        fetchLyrics(song)
+        fetchRecommendations(song)
     }
 
-    private val _searchQuery = MutableStateFlow("")
-    val searchQuery = _searchQuery.asStateFlow()
 
     private val _sortOrder = MutableStateFlow(SortOrder.TITLE)
     val sortOrder = _sortOrder.asStateFlow()
@@ -153,9 +213,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun updateSearchQuery(query: String) {
-        _searchQuery.value = query
-    }
 
     fun updateSortOrder(order: SortOrder) {
         _sortOrder.value = order
@@ -228,6 +285,83 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun deleteSong(song: SongEntity) {
         viewModelScope.launch {
             repository.deleteSong(song)
+        }
+    }
+
+    private val downloader = com.example.service.MusicDownloader(application)
+
+    fun downloadSong(song: SongEntity) {
+        downloader.downloadSong(song) { downloadedPath ->
+            viewModelScope.launch {
+                val updatedSong = song.copy(
+                    isDownloaded = true,
+                    localDownloadPath = downloadedPath
+                )
+                // Reuse existing db instance (Bug A2 fix)
+                db.songDao().insertSongs(listOf(updatedSong))
+            }
+        }
+    }
+
+    private val _currentLyrics = MutableStateFlow<String?>(null)
+    val currentLyrics = _currentLyrics.asStateFlow()
+
+    private val _recommendations = MutableStateFlow<List<SongEntity>>(emptyList())
+    val recommendations = _recommendations.asStateFlow()
+
+    fun fetchLyrics(song: SongEntity) {
+        viewModelScope.launch {
+            try {
+                // Check if API key is a placeholder (Bug A7 fix)
+                val apiKey = com.example.data.remote.NetworkModule.musixmatchApiKey
+                if (apiKey.startsWith("PLACEHOLDER")) {
+                    _currentLyrics.value = null // Don't show lyrics section
+                    return@launch
+                }
+                _currentLyrics.value = "Loading lyrics..."
+                val response = com.example.data.remote.NetworkModule.musixmatchApiService.getLyrics(
+                    track = song.title,
+                    artist = song.artist,
+                    apiKey = apiKey
+                )
+                _currentLyrics.value = response.message?.body?.lyrics?.lyricsBody ?: "Lyrics not found."
+            } catch (e: Exception) {
+                _currentLyrics.value = null // Hide section on error
+            }
+        }
+    }
+
+    fun fetchRecommendations(song: SongEntity) {
+        viewModelScope.launch {
+            try {
+                // Check if API key is a placeholder (Bug A7 fix)
+                val apiKey = com.example.data.remote.NetworkModule.lastFmApiKey
+                if (apiKey.startsWith("PLACEHOLDER")) {
+                    _recommendations.value = emptyList()
+                    return@launch
+                }
+                val response = com.example.data.remote.NetworkModule.lastFmApiService.getSimilarTracks(
+                    track = song.title,
+                    artist = song.artist,
+                    apiKey = apiKey
+                )
+                
+                val tracks = response.similartracks?.track ?: emptyList()
+                val mapped = tracks.map { track ->
+                    SongEntity(
+                        filePath = track.name ?: "",
+                        title = track.name ?: "Unknown",
+                        artist = track.artist?.name ?: "Unknown",
+                        album = "Similar Track",
+                        duration = 0L,
+                        albumArtPath = track.image?.lastOrNull()?.url,
+                        isOnline = true
+                    )
+                }
+                _recommendations.value = mapped
+            } catch (e: Exception) {
+                _recommendations.value = emptyList()
+            }
         }
     }
 

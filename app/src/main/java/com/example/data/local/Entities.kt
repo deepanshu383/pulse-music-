@@ -31,5 +31,9 @@ data class SongEntity(
     val duration: Long,
     val bitrate: Int = 0,
     val albumArtPath: String? = null,
-    val lastModified: Long = System.currentTimeMillis()
+    val lastModified: Long = System.currentTimeMillis(),
+    val isOnline: Boolean = false,
+    val downloadUrl: String? = null,
+    val isDownloaded: Boolean = false,
+    val localDownloadPath: String? = null
 )

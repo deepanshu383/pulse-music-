@@ -3,16 +3,21 @@ package com.example.ui
 import androidx.compose.animation.*
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.LibraryMusic
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -26,6 +31,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.example.data.local.SongEntity
 import com.example.ui.theme.*
 
 private data class NavItem(
@@ -37,6 +43,7 @@ private data class NavItem(
 
 private val navItems = listOf(
     NavItem("home", Icons.Filled.Home, Icons.Outlined.Home, "Home"),
+    NavItem("search", Icons.Filled.Search, Icons.Outlined.Search, "Search"),
     NavItem("library", Icons.Filled.LibraryMusic, Icons.Outlined.LibraryMusic, "Library"),
     NavItem("settings", Icons.Filled.Settings, Icons.Outlined.Settings, "Settings")
 )
@@ -72,16 +79,36 @@ fun MainScreen(viewModel: MainViewModel) {
     Scaffold(
         containerColor = DarkBackground,
         bottomBar = {
-            PulseBottomNavBar(
-                currentRoute = currentRoute,
-                onNavigate = { route ->
-                    navController.navigate(route) {
-                        popUpTo("home") { saveState = true }
-                        launchSingleTop = true
-                        restoreState = true
-                    }
+            Column {
+                // B1: Mini Player Bar (visible when not on Home and a song is playing)
+                val showMiniPlayer = currentRoute != "home" && nowPlayingSong != null
+                if (showMiniPlayer) {
+                    MiniPlayerBar(
+                        song = nowPlayingSong!!,
+                        isPlaying = playbackState.isPlaying,
+                        onPlayPause = {
+                            if (playbackState.isPlaying) viewModel.musicController.pause()
+                            else viewModel.musicController.play()
+                        },
+                        onClick = {
+                            navController.navigate("home") {
+                                popUpTo("home") { inclusive = true }
+                                launchSingleTop = true
+                            }
+                        }
+                    )
                 }
-            )
+                PulseBottomNavBar(
+                    currentRoute = currentRoute,
+                    onNavigate = { route ->
+                        navController.navigate(route) {
+                            popUpTo("home") { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                )
+            }
         }
     ) { innerPadding ->
         NavHost(
@@ -92,10 +119,15 @@ fun MainScreen(viewModel: MainViewModel) {
             exitTransition = { fadeOut(animationSpec = tween(300)) }
         ) {
             composable("home") {
+                val currentLyrics by viewModel.currentLyrics.collectAsStateWithLifecycle()
+                val recommendations by viewModel.recommendations.collectAsStateWithLifecycle()
+
                 HomeScreen(
-                    song = nowPlayingSong,
+                    song = playbackState.currentSongId?.let { id -> songs.find { it.filePath == id } },
                     playbackState = playbackState,
-                    queueSongCount = queueSongCount,
+                    queueSongCount = playbackState.queue.size,
+                    currentLyrics = currentLyrics,
+                    recommendations = recommendations,
                     onPlayPause = {
                         if (playbackState.isPlaying) {
                             viewModel.musicController.pause()
@@ -139,6 +171,20 @@ fun MainScreen(viewModel: MainViewModel) {
                     onGoToSong = { index -> viewModel.skipToQueueItem(index) },
                     onMoveQueueItem = { from, to -> viewModel.moveQueueItem(from, to) },
                     onRepeatQueueItem = { index -> viewModel.repeatQueueItem(index) }
+                )
+            }
+
+            composable("search") {
+                SearchScreen(
+                    viewModel = viewModel,
+                    onSongClick = { song, list ->
+                        viewModel.playSong(song, list)
+                        viewModel.playlistPrefs.saveLastPlayedSongId(song.filePath)
+                        navController.navigate("home") {
+                            popUpTo("home") { inclusive = true }
+                            launchSingleTop = true
+                        }
+                    }
                 )
             }
 
@@ -259,7 +305,7 @@ private fun PulseBottomNavBar(
     onNavigate: (String) -> Unit
 ) {
     // Only show for main tabs, hide during sub-screens
-    val isMainTab = currentRoute in listOf("home", "library", "settings")
+    val isMainTab = currentRoute in listOf("home", "search", "library", "settings")
 
     AnimatedVisibility(
         visible = isMainTab,
@@ -327,6 +373,70 @@ private fun PulseNavItem(
                         .height(3.dp)
                         .clip(RoundedCornerShape(1.5.dp))
                         .background(PulseAccent)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+fun MiniPlayerBar(
+    song: SongEntity,
+    isPlaying: Boolean,
+    onPlayPause: () -> Unit,
+    onClick: () -> Unit
+) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick),
+        color = DarkSurfaceContainer,
+        tonalElevation = 4.dp
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            // Album Art
+            coil.compose.AsyncImage(
+                model = song.albumArtPath,
+                contentDescription = "Album Art",
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(8.dp)),
+                contentScale = androidx.compose.ui.layout.ContentScale.Crop
+            )
+            
+            Spacer(modifier = Modifier.width(12.dp))
+            
+            // Song Info
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = song.title,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+                Text(
+                    text = song.artist,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = TextSecondary,
+                    maxLines = 1,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+            }
+            
+            // Play/Pause Button
+            IconButton(onClick = onPlayPause) {
+                Icon(
+                    imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                    contentDescription = if (isPlaying) "Pause" else "Play",
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(28.dp)
                 )
             }
         }

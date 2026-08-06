@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -30,10 +32,12 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
@@ -59,7 +63,9 @@ fun HomeScreen(
     onRemoveFromQueue: (Int) -> Unit,
     onGoToSong: (Int) -> Unit,
     onMoveQueueItem: (Int, Int) -> Unit,
-    onRepeatQueueItem: (Int) -> Unit
+    onRepeatQueueItem: (Int) -> Unit,
+    currentLyrics: String? = null,
+    recommendations: List<SongEntity> = emptyList()
 ) {
     var showQueue by remember { mutableStateOf(false) }
 
@@ -72,57 +78,79 @@ fun HomeScreen(
             // Empty state
             EmptyHomeState()
         } else {
+            val configuration = LocalConfiguration.current
+            val screenHeight = configuration.screenHeightDp.dp
+            
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
                     .padding(horizontal = 20.dp)
                     .padding(top = 16.dp)
             ) {
-                // Header
-                HomeHeader(queueSongCount = queueSongCount)
+                // Top Player Section
+                Column(
+                    modifier = Modifier.height(screenHeight - 160.dp)
+                ) {
+                    // Header
+                    HomeHeader(queueSongCount = queueSongCount)
 
-                Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                // Hero Artwork with swipe gestures
-                HeroArtwork(
-                    song = song,
-                    onSwipeLeft = onNext,
-                    onSwipeRight = onPrevious,
-                    modifier = Modifier.weight(0.65f)
-                )
+                    // Hero Artwork with swipe gestures
+                    HeroArtwork(
+                        song = song,
+                        onSwipeLeft = onNext,
+                        onSwipeRight = onPrevious,
+                        modifier = Modifier.weight(1f)
+                    )
 
-                Spacer(modifier = Modifier.height(20.dp))
+                    Spacer(modifier = Modifier.height(20.dp))
 
-                // Song Info
-                SongInfoSection(song = song)
+                    // Song Info
+                    SongInfoSection(song = song)
 
-                Spacer(modifier = Modifier.height(16.dp))
+                    Spacer(modifier = Modifier.height(16.dp))
 
-                // Progress Bar
-                ProgressSection(
-                    playbackState = playbackState,
-                    duration = song.duration,
-                    onSeek = onSeek
-                )
+                    // Progress Bar (Bug A5 fix: use live duration from ExoPlayer)
+                    ProgressSection(
+                        playbackState = playbackState,
+                        duration = if (playbackState.duration > 0) playbackState.duration else song.duration,
+                        onSeek = onSeek
+                    )
 
-                Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                // Playback Controls
-                PlaybackControls(
-                    playbackState = playbackState,
-                    onPlayPause = onPlayPause,
-                    onNext = onNext,
-                    onPrevious = onPrevious,
-                    onShuffleToggle = onShuffleToggle,
-                    onRepeatToggle = onRepeatToggle
-                )
+                    // Playback Controls
+                    PlaybackControls(
+                        playbackState = playbackState,
+                        onPlayPause = onPlayPause,
+                        onNext = onNext,
+                        onPrevious = onPrevious,
+                        onShuffleToggle = onShuffleToggle,
+                        onRepeatToggle = onRepeatToggle
+                    )
 
-                Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
 
-                // Swipe up indicator
-                SwipeUpIndicator(onClick = { showQueue = true })
+                    // Swipe up indicator
+                    SwipeUpIndicator(onClick = { showQueue = true })
 
-                Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                
+                // Lyrics Section
+                if (currentLyrics != null) {
+                    Spacer(modifier = Modifier.height(24.dp))
+                    LyricsCard(lyrics = currentLyrics)
+                }
+                
+                // Recommendations Section
+                if (recommendations.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(32.dp))
+                    RecommendationsSection(recommendations = recommendations)
+                    Spacer(modifier = Modifier.height(40.dp))
+                }
             }
         }
     }
@@ -877,6 +905,82 @@ fun QueueBottomSheet(
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
+            }
+        }
+    }
+}
+
+@Composable
+fun LyricsCard(lyrics: String) {
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 8.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+        shape = RoundedCornerShape(16.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = "Lyrics",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = lyrics,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                lineHeight = 24.sp
+            )
+        }
+    }
+}
+
+@Composable
+fun RecommendationsSection(recommendations: List<SongEntity>) {
+    Column {
+        Text(
+            text = "Recommended for You",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
+            color = MaterialTheme.colorScheme.onBackground,
+            modifier = Modifier.padding(bottom = 12.dp)
+        )
+        androidx.compose.foundation.lazy.LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            items(recommendations.size) { index ->
+                val song = recommendations[index]
+                Column(
+                    modifier = Modifier.width(120.dp)
+                ) {
+                    AsyncImage(
+                        model = song.albumArtPath ?: android.R.drawable.ic_media_play,
+                        contentDescription = "Album Art",
+                        modifier = Modifier
+                            .size(120.dp)
+                            .clip(RoundedCornerShape(8.dp))
+                            .background(Color.DarkGray),
+                        contentScale = ContentScale.Crop
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = song.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+                    Text(
+                        text = song.artist,
+                        style = MaterialTheme.typography.bodySmall,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = TextSecondary
+                    )
+                }
             }
         }
     }
