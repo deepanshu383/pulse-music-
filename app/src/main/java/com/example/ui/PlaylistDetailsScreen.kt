@@ -51,7 +51,8 @@ fun PlaylistDetailsScreen(
     onEditPlaylistName: (String) -> Unit,
     onMoveSong: (Int, Int) -> Unit,
     onSongClick: (SongEntity) -> Unit,
-    onAddToQueue: (SongEntity) -> Unit = {}
+    onAddToQueue: (SongEntity) -> Unit = {},
+    onAddToPlaylist: (SongEntity) -> Unit = {}
 ) {
     var showEditDialog by remember { mutableStateOf(false) }
     var sortOrder by remember(initialSortOrder) { mutableStateOf(initialSortOrder) }
@@ -330,6 +331,7 @@ fun PlaylistDetailsScreen(
                                     onSongClick = { onSongClick(song) },
                                     onRemove = { onRemoveSong(song) },
                                     onAddToQueue = { onAddToQueue(song) },
+                                    onAddToPlaylist = { onAddToPlaylist(song) },
                                     hapticFeedback = { haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
                                 )
                             }
@@ -347,6 +349,7 @@ fun PlaylistDetailsScreen(
                                     onSongClick = { onSongClick(song) },
                                     onRemove = { onRemoveSong(song) },
                                     onAddToQueue = { onAddToQueue(song) },
+                                    onAddToPlaylist = { onAddToPlaylist(song) },
                                     hapticFeedback = { haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
                                 )
                             }
@@ -361,6 +364,7 @@ fun PlaylistDetailsScreen(
                                     onSongClick = { onSongClick(song) },
                                     onRemove = { onRemoveSong(song) },
                                     onAddToQueue = { onAddToQueue(song) },
+                                    onAddToPlaylist = { onAddToPlaylist(song) },
                                     hapticFeedback = { haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
                                 )
                                 Spacer(modifier = Modifier.height(8.dp))
@@ -433,6 +437,7 @@ fun PlaylistSongItem(
     onSongClick: () -> Unit,
     onRemove: () -> Unit,
     onAddToQueue: () -> Unit = {},
+    onAddToPlaylist: () -> Unit = {},
     hapticFeedback: () -> Unit
 ) {
     var showContextMenu by remember { mutableStateOf(false) }
@@ -653,7 +658,7 @@ fun PlaylistSongItem(
                     leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
                     onClick = {
                         showContextMenu = false
-                        // Handle add to playlist
+                        onAddToPlaylist()
                     }
                 )
                 DropdownMenuItem(

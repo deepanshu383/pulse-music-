@@ -104,7 +104,7 @@ class MusicController(private val context: Context) {
         }
     }
     
-    fun setInitialQueue(songId: String?, queueIds: List<String>, allSongs: List<SongEntity>) {
+    fun setInitialQueue(songId: String?, queueIds: List<String>, allSongs: List<SongEntity>, playbackPosition: Long = 0L) {
         controller?.let { player ->
             if (player.mediaItemCount == 0) {
                 val mediaItems = mutableListOf<MediaItem>()
@@ -115,7 +115,7 @@ class MusicController(private val context: Context) {
                     allSongs.find { it.filePath == qid }?.let { mediaItems.add(it.toMediaItem()) }
                 }
                 if (mediaItems.isNotEmpty()) {
-                    player.setMediaItems(mediaItems, 0, C.TIME_UNSET)
+                    player.setMediaItems(mediaItems, 0, playbackPosition)
                     player.prepare()
                 }
             }
@@ -139,6 +139,21 @@ class MusicController(private val context: Context) {
         controller?.moveMediaItem(from, to)
     }
     
+    fun insertQueueItem(index: Int, mediaItem: MediaItem) {
+        controller?.let { player ->
+            // Create a clean copy of the MediaItem to avoid any stale internal state
+            val cleanItem = mediaItem.buildUpon()
+                .setMediaId(mediaItem.mediaId)
+                .build()
+            
+            val targetIndex = index.coerceIn(0, player.mediaItemCount)
+            player.addMediaItem(targetIndex, cleanItem)
+            
+            // Explicitly trigger a state update
+            updateState()
+        }
+    }
+    
     fun removeQueueItem(index: Int) {
         controller?.removeMediaItem(index)
     }
@@ -146,9 +161,16 @@ class MusicController(private val context: Context) {
     fun clearQueue() {
         controller?.let { player ->
             val currentIndex = player.currentMediaItemIndex
-            if (currentIndex != -1 && currentIndex < player.mediaItemCount - 1) {
-                player.removeMediaItems(currentIndex + 1, player.mediaItemCount)
-            } else if (currentIndex == -1) {
+            if (currentIndex != -1) {
+                // Clear items after current
+                if (currentIndex < player.mediaItemCount - 1) {
+                    player.removeMediaItems(currentIndex + 1, player.mediaItemCount)
+                }
+                // Clear items before current
+                if (currentIndex > 0) {
+                    player.removeMediaItems(0, currentIndex)
+                }
+            } else {
                 player.clearMediaItems()
             }
         }

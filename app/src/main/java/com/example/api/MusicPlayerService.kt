@@ -21,10 +21,11 @@ class MusicPlayerService(private val context: Context) {
     private val db = Room.databaseBuilder(
         context.applicationContext,
         AppDatabase::class.java, "pulse_music_db"
-    ).build()
+    ).addMigrations(AppDatabase.MIGRATION_3_4)
+    .fallbackToDestructiveMigration().build()
     
     private val musicRepo = MusicRepository(context.applicationContext, db.songDao())
-    private val playlistRepo = PlaylistRepository(db.playlistDao())
+    private val playlistRepo = PlaylistRepository(db.playlistDao(), db.songDao())
 
     private val listeners = mutableListOf<MusicPlayerListener>()
     private val scope = CoroutineScope(Dispatchers.Main)

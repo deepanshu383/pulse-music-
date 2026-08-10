@@ -87,4 +87,12 @@ class PlaylistPreferencesRepository(context: Context) {
     fun setAutoPlayNextEnabled(enabled: Boolean) {
         prefs.edit().putBoolean("auto_play_next_enabled", enabled).apply()
     }
+
+    fun getLastPlaybackPosition(): Long {
+        return prefs.getLong("last_playback_position", 0L)
+    }
+
+    fun saveLastPlaybackPosition(position: Long) {
+        prefs.edit().putLong("last_playback_position", position).apply()
+    }
 }

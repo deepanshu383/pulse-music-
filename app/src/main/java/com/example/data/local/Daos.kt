@@ -58,9 +58,38 @@ interface SongDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertSongs(songs: List<SongEntity>)
 
+    /** Insert or replace a single song (used for online songs added to playlists). */
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSong(song: SongEntity)
+
+    /** Returns null if the song is not in the local cache. */
+    @Query("SELECT * FROM song_metadata WHERE filePath = :filePath LIMIT 1")
+    suspend fun getSongByPath(filePath: String): SongEntity?
+
     @Query("DELETE FROM song_metadata")
     suspend fun clearCache()
 
     @Query("DELETE FROM song_metadata WHERE filePath = :filePath")
     suspend fun deleteSong(filePath: String)
+}
+
+@Dao
+interface SearchHistoryDao {
+    @Query("SELECT * FROM search_history ORDER BY timestamp DESC")
+    fun getSearchHistory(): Flow<List<SearchHistoryEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertSearchHistory(entry: SearchHistoryEntity)
+
+    @Query("DELETE FROM search_history WHERE referenceId = :referenceId AND type = :type")
+    suspend fun deleteByReference(referenceId: String, type: String)
+
+    @Query("DELETE FROM search_history WHERE id = :id")
+    suspend fun deleteSearchHistory(id: Long)
+
+    @Query("DELETE FROM search_history")
+    suspend fun clearSearchHistory()
+
+    @Query("DELETE FROM search_history WHERE id NOT IN (SELECT id FROM search_history ORDER BY timestamp DESC LIMIT :limit)")
+    suspend fun deleteOldEntries(limit: Int)
 }

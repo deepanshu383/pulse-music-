@@ -38,7 +38,8 @@ fun LibraryScreen(
     onCreatePlaylist: (String) -> Unit,
     onPlaylistClick: (Long) -> Unit,
     onSongClick: (SongEntity) -> Unit,
-    onAddToQueue: (SongEntity) -> Unit = {}
+    onAddToQueue: (SongEntity) -> Unit = {},
+    onAddToPlaylist: (SongEntity) -> Unit = {}
 ) {
     var showCreateDialog by remember { mutableStateOf(false) }
     var showFabMenu by remember { mutableStateOf(false) }
@@ -309,6 +310,7 @@ fun LibraryScreen(
                                 onSongClick = { onSongClick(song) },
                                 onRemove = { /* Not applicable here */ },
                                 onAddToQueue = { onAddToQueue(song) },
+                                onAddToPlaylist = { onAddToPlaylist(song) },
                                 hapticFeedback = { haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
                             )
                         }
@@ -329,6 +331,7 @@ fun LibraryScreen(
                                             onSongClick = { onSongClick(song) },
                                             onRemove = { },
                                             onAddToQueue = { onAddToQueue(song) },
+                                            onAddToPlaylist = { onAddToPlaylist(song) },
                                             hapticFeedback = { haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
                                         )
                                     }
@@ -348,6 +351,7 @@ fun LibraryScreen(
                                     onSongClick = { onSongClick(song) },
                                     onRemove = { },
                                     onAddToQueue = { onAddToQueue(song) },
+                                    onAddToPlaylist = { onAddToPlaylist(song) },
                                     hapticFeedback = { haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
                                 )
                             }

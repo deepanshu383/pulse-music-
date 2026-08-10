@@ -4,11 +4,14 @@ import android.content.Context
 import androidx.credentials.CredentialManager
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialException
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.NoCredentialException
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
 import com.google.firebase.auth.FirebaseUser
+import com.example.R
 import kotlinx.coroutines.tasks.await
 
 class FirebaseAuthManager(private val context: Context) {
@@ -16,7 +19,7 @@ class FirebaseAuthManager(private val context: Context) {
     private val credentialManager = CredentialManager.create(context)
 
     // Using the web client ID configured via Firebase
-    private val webClientId = "348867381893-kf50iaqep3og3fr2le0g69p1e3i3lnb1.apps.googleusercontent.com"
+    private val webClientId by lazy { context.getString(R.string.default_web_client_id) }
 
     val currentUser: FirebaseUser?
         get() = auth.currentUser
@@ -36,7 +39,7 @@ class FirebaseAuthManager(private val context: Context) {
             val result = credentialManager.getCredential(context = context, request = request)
             val credential = result.credential
 
-            if (credential is GoogleIdTokenCredential) {
+            if (credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
                 val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
                 val idToken = googleIdTokenCredential.idToken
                 
@@ -47,8 +50,12 @@ class FirebaseAuthManager(private val context: Context) {
                     Result.success(it)
                 } ?: Result.failure(Exception("User is null after sign in"))
             } else {
-                Result.failure(Exception("Unexpected credential type"))
+                Result.failure(Exception("Unexpected credential type: ${credential.type}"))
             }
+        } catch (e: GetCredentialCancellationException) {
+            Result.failure(Exception("Sign in was canceled", e))
+        } catch (e: NoCredentialException) {
+            Result.failure(Exception("No Google accounts found. Please sign in to a Google account on this device.", e))
         } catch (e: GetCredentialException) {
             Result.failure(e)
         } catch (e: Exception) {

@@ -53,7 +53,10 @@ class MainActivity : ComponentActivity() {
 
                 if (!isLoggedIn) {
                     com.example.ui.LoginScreen(
-                        onLoginSuccess = { isLoggedIn = true }
+                        onLoginSuccess = { 
+                            isLoggedIn = true 
+                            viewModel.syncPlaylists()
+                        }
                     )
                 } else {
                     if (permissionState.status.isGranted || folderUri != null) {

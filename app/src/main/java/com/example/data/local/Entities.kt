@@ -37,3 +37,12 @@ data class SongEntity(
     val isDownloaded: Boolean = false,
     val localDownloadPath: String? = null
 )
+
+@Entity(tableName = "search_history")
+data class SearchHistoryEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val type: String, // "SONG", "PLAYLIST", "ARTIST"
+    val referenceId: String,
+    val timestamp: Long = System.currentTimeMillis()
+)

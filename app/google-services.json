@@ -1,34 +1,42 @@
 {
   "project_info": {
-    "project_number": "348867381893",
-    "firebase_url": "https://ddmk-4d04f-default-rtdb.firebaseio.com",
-    "project_id": "ddmk-4d04f",
-    "storage_bucket": "ddmk-4d04f.firebasestorage.app"
+    "project_number": "238294648106",
+    "firebase_url": "https://pulse-music-app-jkrx-default-rtdb.firebaseio.com",
+    "project_id": "pulse-music-app-jkrx",
+    "storage_bucket": "pulse-music-app-jkrx.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:348867381893:android:4925ae1a6634456db077ec",
+        "mobilesdk_app_id": "1:238294648106:android:f7062bedfc9bc6bdfb8a53",
         "android_client_info": {
-          "package_name": "com.aistudio.musicplayer.jkrx"
+          "package_name": "pulse.music"
         }
       },
       "oauth_client": [
         {
-          "client_id": "348867381893-kf50iaqep3og3fr2le0g69p1e3i3lnb1.apps.googleusercontent.com",
+          "client_id": "238294648106-llqeao4sr89dn384i906v75qbhrd25an.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "pulse.music",
+            "certificate_hash": "bdd171867880b148114fb2ca879e2549ad8ed3a3"
+          }
+        },
+        {
+          "client_id": "238294648106-4l7vknbn417i0opcrd09r02r6vgbpvk5.apps.googleusercontent.com",
           "client_type": 3
         }
       ],
       "api_key": [
         {
-          "current_key": "AIzaSyBH9rg-bPJfLvv9NcgcXwQwBhGzfqujxos"
+          "current_key": "AIzaSyAJr0-hVTOKpVU9ibdbi0ypbdbkCp11Dd0"
         }
       ],
       "services": {
         "appinvite_service": {
           "other_platform_oauth_client": [
             {
-              "client_id": "348867381893-kf50iaqep3og3fr2le0g69p1e3i3lnb1.apps.googleusercontent.com",
+              "client_id": "238294648106-4l7vknbn417i0opcrd09r02r6vgbpvk5.apps.googleusercontent.com",
               "client_type": 3
             }
           ]
