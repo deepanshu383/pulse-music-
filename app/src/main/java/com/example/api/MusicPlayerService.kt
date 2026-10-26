@@ -21,7 +21,7 @@ class MusicPlayerService(private val context: Context) {
     private val db = Room.databaseBuilder(
         context.applicationContext,
         AppDatabase::class.java, "pulse_music_db"
-    ).addMigrations(AppDatabase.MIGRATION_3_4)
+    ).addMigrations(AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6)
     .fallbackToDestructiveMigration().build()
     
     private val musicRepo = MusicRepository(context.applicationContext, db.songDao())
@@ -30,8 +30,12 @@ class MusicPlayerService(private val context: Context) {
     private val listeners = mutableListOf<MusicPlayerListener>()
     private val scope = CoroutineScope(Dispatchers.Main)
     private var stateObserverJob: Job? = null
+    private var loggedSongId: String? = null
+    private var lastObservedSongId: String? = null
+    private var lastObservedPosition: Long = 0L
 
     init {
+        com.example.recommendation.ListeningEventLogger.init(db.playbackHistoryDao())
         musicController.initialize {
             startObservingState()
         }
@@ -71,7 +75,61 @@ class MusicPlayerService(private val context: Context) {
                     it.onRepeatModeChanged(apiRepeatMode)
                     it.onShuffleChanged(state.shuffleModeEnabled)
                 }
+                
+                // Update ListeningEventLogger progress
+                if (state.currentSongId != null) {
+                    com.example.recommendation.ListeningEventLogger.onProgressUpdated(state.currentPosition)
+                }
+
+                // Track changes
+                if (state.currentSongId != lastObservedSongId) {
+                    if (state.currentSongId != null) {
+                        val currentMediaItem = state.queue.getOrNull(state.currentQueueIndex)
+                        val artistId = "" // We'll rely on name for now if id isn't in metadata
+                        val artistName = currentMediaItem?.mediaMetadata?.artist?.toString() ?: "Unknown"
+                        val trackTitle = currentMediaItem?.mediaMetadata?.title?.toString() ?: ""
+                        
+                        com.example.recommendation.ListeningEventLogger.onTrackStarted(
+                            trackId = state.currentSongId,
+                            title = trackTitle,
+                            artistId = artistId,
+                            artistName = artistName,
+                            durationMs = state.duration
+                        )
+                        
+                        // Persist to local Room DB with canonical key for cross-session dedup
+                        logPlaybackHistoryAsync(state.currentSongId, trackTitle, artistName)
+                    }
+                }
+                
+                lastObservedSongId = state.currentSongId
+                lastObservedPosition = state.currentPosition
+                
+                // Old Temporal Context Tracking replaced by ListeningEventLogger
             }
+        }
+    }
+
+    private fun logPlaybackHistoryAsync(trackId: String, title: String, artist: String) {
+        scope.launch(Dispatchers.IO) {
+            val hour = java.util.Calendar.getInstance().get(java.util.Calendar.HOUR_OF_DAY)
+            val segment = when (hour) {
+                in 6..11 -> "Morning"
+                in 12..16 -> "Afternoon"
+                in 17..20 -> "Evening"
+                else -> "Night"
+            }
+            val canonicalKey = com.example.recommendation.RecommendationSessionManager
+                .getCanonicalSongKey(title, artist)
+            val history = com.example.data.local.PlaybackHistoryEntity(
+                trackId = trackId,
+                timestamp = System.currentTimeMillis(),
+                timeSegment = segment,
+                title = title,
+                artist = artist,
+                canonicalSongKey = canonicalKey
+            )
+            db.playbackHistoryDao().insertHistory(history)
         }
     }
 

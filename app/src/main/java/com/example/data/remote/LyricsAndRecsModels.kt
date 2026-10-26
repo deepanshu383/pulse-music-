@@ -53,3 +53,23 @@ data class LastFmImage(
     @Json(name = "#text") val url: String?,
     val size: String?
 )
+
+@JsonClass(generateAdapter = true)
+data class LastFmTrackInfoResponse(
+    val track: LastFmTrackDetail?
+)
+
+@JsonClass(generateAdapter = true)
+data class LastFmTrackDetail(
+    val toptags: LastFmToptags?
+)
+
+@JsonClass(generateAdapter = true)
+data class LastFmToptags(
+    val tag: List<LastFmTag>?
+)
+
+@JsonClass(generateAdapter = true)
+data class LastFmTag(
+    val name: String
+)

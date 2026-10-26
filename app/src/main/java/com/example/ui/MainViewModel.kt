@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.room.Room
 import com.example.data.local.UserPreferencesRepository
 import com.example.data.local.AppDatabase
+import com.example.data.local.sessionDataStore
 import com.example.data.local.SongEntity
 import com.example.data.remote.ApiArtistDetail
 import com.example.data.remote.ApiArtistSearchItem
@@ -16,6 +17,7 @@ import com.example.data.repository.MusicRepository
 import com.example.service.MusicController
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -39,7 +41,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val db = Room.databaseBuilder(
         application,
         AppDatabase::class.java, "pulse_music_db"
-    ).addMigrations(AppDatabase.MIGRATION_3_4)
+    ).addMigrations(AppDatabase.MIGRATION_3_4, AppDatabase.MIGRATION_4_5, AppDatabase.MIGRATION_5_6)
     .fallbackToDestructiveMigration().build()
 
     private val userPreferences = UserPreferencesRepository(application)
@@ -52,6 +54,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = MusicRepository(application, db.songDao())
     val playlistRepository = com.example.data.repository.PlaylistRepository(db.playlistDao(), db.songDao())
     val playlistPrefs = com.example.data.local.PlaylistPreferencesRepository(application)
+    private val sessionStateStore = com.example.data.local.SessionStateStore(application.sessionDataStore)
 
     val allPlaylists = playlistRepository.getAllPlaylists().stateIn(
         scope = viewModelScope,
@@ -60,6 +63,45 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
 
     private val jioSaavnRepository = com.example.data.repository.JioSaavnRepository()
+
+    private val recommendationEngine = com.example.recommendation.DefaultRecommendationEngine(
+        timeOfDayScorer = com.example.recommendation.TimeOfDayScorer(db.playbackHistoryDao()),
+        fatigueScorer = com.example.recommendation.FatigueScorer(db.playbackHistoryDao()),
+        userPreferencesManager = com.example.data.local.UserPreferencesManager(application)
+    )
+    
+    private val weightAnalyticsManager = com.example.recommendation.WeightAnalyticsManager()
+    private var userAffinityProfile = com.example.data.remote.UserAffinityProfile()
+
+    private var lastAutoEnqueuedForSongId: String? = null
+    
+    // Caches for API songs to avoid re-fetching metadata for score features
+    private val onlineSongYearCache = mutableMapOf<String, Int>()
+    private val onlineSongLangCache = mutableMapOf<String, String>()
+    private val onlineSongTagsCache = mutableMapOf<String, List<String>>()
+    private var lockedSessionLanguage: String? = null
+
+    init {
+        viewModelScope.launch {
+            val history = db.playbackHistoryDao().getRecentHistory(20)
+            val trackIds = history.map { it.trackId }
+            val canonicalKeys = history.map { it.canonicalSongKey }.filter { it.isNotBlank() }
+            com.example.recommendation.RecommendationSessionManager.prepopulateHistory(trackIds, canonicalKeys)
+            
+            val (moodLock, langLock) = sessionStateStore.restoreLock()
+            if (moodLock != null) {
+                com.example.recommendation.RecommendationSessionManager.registerManualPick(moodLock)
+            }
+            if (langLock != null) {
+                lockedSessionLanguage = langLock
+            }
+
+            // Temporary instrumentation run
+            if (com.example.BuildConfig.DEBUG) {
+                runInstrumentationLoop()
+            }
+        }
+    }
 
     // ═══════════════════════════════════════════════
     // Helper: Map ApiSong → SongEntity
@@ -408,6 +450,439 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                         }
                     }
                 }
+                
+                // ═══════════════════════════════════════════════
+                // Auto-enqueue next recommended track
+                // ═══════════════════════════════════════════════
+                if (state.currentSongId != null
+                    && state.queue.isNotEmpty()
+                    && state.currentQueueIndex >= 0
+                    && state.currentQueueIndex >= state.queue.size - 1
+                    && state.currentSongId != lastAutoEnqueuedForSongId
+                    && _isAutoPlayNextEnabled.value
+                ) {
+                    lastAutoEnqueuedForSongId = state.currentSongId
+                    viewModelScope.launch {
+                        try {
+                            val allLocalSongs = repository.cachedSongs.first()
+                            
+                            // Find current song
+                            val currentSong = allLocalSongs.find { it.filePath == state.currentSongId }
+                                ?: state.queue.getOrNull(state.currentQueueIndex)?.let { mediaItem ->
+                                    SongEntity(
+                                        filePath = mediaItem.mediaId,
+                                        title = mediaItem.mediaMetadata.title?.toString() ?: "Unknown",
+                                        artist = mediaItem.mediaMetadata.artist?.toString() ?: "Unknown",
+                                        album = mediaItem.mediaMetadata.albumTitle?.toString() ?: "Unknown",
+                                        duration = 0L,
+                                        albumArtPath = mediaItem.mediaMetadata.artworkUri?.toString(),
+                                        isOnline = true
+                                    )
+                                }
+                            
+                            if (currentSong != null) {
+                                val currentFeatures = currentSong.toTrackFeatures()
+                                // Register current song as played
+                                com.example.recommendation.RecommendationSessionManager.registerPlayedTrack(
+                                    currentSong.filePath, currentSong.title, currentSong.artist
+                                )
+                                val lockedGroup = com.example.recommendation.RecommendationSessionManager.getLockedMoodGroup() ?: "None"
+                                android.util.Log.d("RecommendationEngine", "Session Locked Mood Group: $lockedGroup")
+                                
+                                val localCandidates = allLocalSongs.filter { it.filePath != currentSong.filePath }
+                                
+                                // ═══════════════════════════════════════════════
+                                // BROADENED CANDIDATE POOL (Phase A)
+                                // Multi-source: JioSaavn mood+lang, mood-only, artist, Last.fm cross-search
+                                // ═══════════════════════════════════════════════
+                                val currentMood = com.example.recommendation.MoodExtractionStrategy.getPrimaryMood(
+                                    currentSong.title, currentSong.album, currentSong.artist
+                                )
+                                // Priority: Fetch candidates using the session's LOCKED mood to prevent pool drift
+                                val fetchMood = com.example.recommendation.RecommendationSessionManager.getLockedMoodGroup() ?: currentMood
+                                var currentLang = lockedSessionLanguage ?: onlineSongLangCache[currentSong.filePath] ?: currentFeatures.language?.lowercase()
+                                val targetLang = determineTargetLanguage(currentLang)
+                                
+                                val moodLangCandidates = mutableListOf<SongEntity>()
+                                val moodOnlyCandidates = mutableListOf<SongEntity>()
+                                val artistCandidates = mutableListOf<SongEntity>()
+                                val lastFmCrossCandidates = mutableListOf<SongEntity>()
+                                
+                                try {
+                                    // Fire 3 parallel JioSaavn searches + 1 Last.fm search
+                                    val moodLangDeferred = viewModelScope.async {
+                                        try {
+                                            jioSaavnRepository.searchSongsByMood(fetchMood, targetLang, 25)
+                                        } catch (e: Exception) { Result.failure(e) }
+                                    }
+                                    
+                                    val moodOnlyDeferred = viewModelScope.async {
+                                        try {
+                                            jioSaavnRepository.searchSongsByMood(fetchMood, targetLang, 25)
+                                        } catch (e: Exception) { Result.failure(e) }
+                                    }
+                                    
+                                    val artistDeferred = viewModelScope.async {
+                                        try {
+                                            jioSaavnRepository.searchSongs(currentSong.artist)
+                                        } catch (e: Exception) { Result.failure(e) }
+                                    }
+                                    
+                                    val lastFmDeferred = viewModelScope.async {
+                                        try {
+                                            com.example.data.remote.NetworkModule.lastFmApiService.getSimilarTracks(
+                                                track = currentSong.title,
+                                                artist = currentSong.artist,
+                                                apiKey = com.example.data.remote.NetworkModule.lastFmApiKey
+                                            )
+                                        } catch (e: Exception) { null }
+                                    }
+                                    
+                                    // Await all results
+                                    val artistResult = artistDeferred.await()
+                                    val artistApiSongs = artistResult.getOrNull() ?: emptyList()
+                                    if (artistApiSongs.isNotEmpty()) {
+                                        // Infer language from artist results (most reliable source)
+                                        currentLang = artistApiSongs.firstOrNull()?.language
+                                    }
+                                    
+                                    // Process artist results
+                                    artistApiSongs.forEach { apiSong ->
+                                        apiSong.year?.toIntOrNull()?.let { onlineSongYearCache[apiSong.id] = it }
+                                        apiSong.language?.let { onlineSongLangCache[apiSong.id] = it }
+                                    }
+                                    artistCandidates.addAll(artistApiSongs.map { mapApiSongToEntity(it) })
+                                    
+                                    // Now re-fire mood+lang with the inferred language if we got it
+                                    val moodLangResult = if (currentLang != null) {
+                                        try {
+                                            jioSaavnRepository.searchSongsByMood(fetchMood, currentLang, 25)
+                                        } catch (e: Exception) { moodLangDeferred.await() }
+                                    } else {
+                                        moodLangDeferred.await()
+                                    }
+                                    val moodLangApiSongs = moodLangResult.getOrNull() ?: emptyList()
+                                    moodLangApiSongs.forEach { apiSong ->
+                                        apiSong.year?.toIntOrNull()?.let { onlineSongYearCache[apiSong.id] = it }
+                                        apiSong.language?.let { onlineSongLangCache[apiSong.id] = it }
+                                    }
+                                    moodLangCandidates.addAll(moodLangApiSongs.map { mapApiSongToEntity(it) })
+                                    
+                                    // Process mood-only results
+                                    val moodOnlyApiSongs = moodOnlyDeferred.await().getOrNull() ?: emptyList()
+                                    moodOnlyApiSongs.forEach { apiSong ->
+                                        apiSong.year?.toIntOrNull()?.let { onlineSongYearCache[apiSong.id] = it }
+                                        apiSong.language?.let { onlineSongLangCache[apiSong.id] = it }
+                                    }
+                                    moodOnlyCandidates.addAll(moodOnlyApiSongs.map { mapApiSongToEntity(it) })
+                                    
+                                    // Process Last.fm similar tracks → cross-search on JioSaavn
+                                    val lastFmResponse = lastFmDeferred.await()
+                                    val similarTracks = lastFmResponse?.similartracks?.track?.take(5) ?: emptyList()
+                                    for (lfmTrack in similarTracks) {
+                                        val lfmName = lfmTrack.name ?: continue
+                                        val lfmArtist = lfmTrack.artist?.name ?: continue
+                                        try {
+                                            val crossResult = jioSaavnRepository.searchSongs("$lfmName $lfmArtist")
+                                            val crossSongs = crossResult.getOrNull()?.take(3) ?: emptyList()
+                                            crossSongs.forEach { apiSong ->
+                                                apiSong.year?.toIntOrNull()?.let { onlineSongYearCache[apiSong.id] = it }
+                                                apiSong.language?.let { onlineSongLangCache[apiSong.id] = it }
+                                            }
+                                            lastFmCrossCandidates.addAll(crossSongs.map { mapApiSongToEntity(it) })
+                                        } catch (_: Exception) { /* skip failed cross-search */ }
+                                    }
+                                    
+                                } catch (e: Exception) {
+                                    android.util.Log.w("RecommendationEngine", "Broadened pool fetch failed", e)
+                                }
+                                
+                                // ═══════════════════════════════════════════════
+                                // PRIORITY MERGE, DEDUP, CAP AT 50
+                                // ═══════════════════════════════════════════════
+                                val POOL_CAP = 50
+                                val seenIds = mutableSetOf<String>()
+                                val mergedCandidates = mutableListOf<SongEntity>()
+                                
+                                // Helper to add without duplicates
+                                fun addUnique(songs: List<SongEntity>) {
+                                    for (song in songs) {
+                                        if (mergedCandidates.size >= POOL_CAP) break
+                                        if (seenIds.add(song.filePath)) {
+                                            mergedCandidates.add(song)
+                                        }
+                                    }
+                                }
+                                
+                                // Priority order: mood+lang > lastFm cross > mood-only > artist > local
+                                addUnique(moodLangCandidates)
+                                addUnique(lastFmCrossCandidates)
+                                addUnique(moodOnlyCandidates)
+                                addUnique(artistCandidates)
+                                addUnique(localCandidates)
+                                
+                                // ═══════════════════════════════════════════════
+                                // TAG FETCHING (For Devotional Filter and Language)
+                                // ═══════════════════════════════════════════════
+                                val apiKey = com.example.data.remote.NetworkModule.lastFmApiKey
+                                if (!apiKey.startsWith("PLACEHOLDER")) {
+                                    val tagJobs = mergedCandidates.map { candidate ->
+                                        viewModelScope.async {
+                                            if (!onlineSongTagsCache.containsKey(candidate.filePath)) {
+                                                try {
+                                                    val res = com.example.data.remote.NetworkModule.lastFmApiService.getTrackInfo(
+                                                        candidate.title, candidate.artist, apiKey
+                                                    )
+                                                    val tags = res.track?.toptags?.tag?.map { it.name.lowercase() } ?: emptyList()
+                                                    onlineSongTagsCache[candidate.filePath] = tags
+                                                } catch (e: Exception) {
+                                                    onlineSongTagsCache[candidate.filePath] = emptyList()
+                                                }
+                                            }
+                                        }
+                                    }
+                                    tagJobs.awaitAll()
+                                }
+
+                                // ═══════════════════════════════════════════════
+                                // DEVOTIONAL CONTENT HARD EXCLUSION (before scoring)
+                                // ═══════════════════════════════════════════════
+                                val preFilterSize = mergedCandidates.size
+                                mergedCandidates.removeAll { candidate ->
+                                    val mood = com.example.recommendation.MoodExtractionStrategy.getPrimaryMood(
+                                        candidate.title, candidate.album, candidate.artist
+                                    )
+                                    val apiTags = onlineSongTagsCache[candidate.filePath] ?: emptyList()
+                                    com.example.recommendation.DevotionalContentFilter.shouldExclude(
+                                        title = candidate.title,
+                                        album = candidate.album,
+                                        artist = candidate.artist,
+                                        moodGenreTag = mood,
+                                        apiTags = apiTags
+                                    )
+                                }
+                                val devotionalRemoved = preFilterSize - mergedCandidates.size
+                                if (devotionalRemoved > 0) {
+                                    android.util.Log.i("PoolComposition", "DevotionalFilter: removed $devotionalRemoved devotional candidates")
+                                }
+                                
+                                // ═══════════════════════════════════════════════
+                                // LOG POOL COMPOSITION
+                                // ═══════════════════════════════════════════════
+                                val moodDistribution = mergedCandidates.groupingBy { candidate ->
+                                    com.example.recommendation.MoodExtractionStrategy.getPrimaryMood(
+                                        candidate.title, candidate.album, candidate.artist
+                                    )
+                                }.eachCount()
+                                val onlineCount = mergedCandidates.count { it.isOnline }
+                                val localCount = mergedCandidates.size - onlineCount
+                                android.util.Log.i(
+                                    "PoolComposition",
+                                    "currentMood=$currentMood | total=${mergedCandidates.size}, " +
+                                    moodDistribution.entries.sortedByDescending { it.value }.joinToString(", ") { "${it.key}=${it.value}" } +
+                                    " | localCount=$localCount, onlineCount=$onlineCount"
+                                )
+                                
+                                // 1. HARD EXCLUSION: Never replay a song played in this session or recently
+                                val relaxedRecentCanonicalKeys = state.queue.takeLast(5).map { 
+                                    com.example.recommendation.RecommendationSessionManager.getCanonicalSongKey(
+                                        it.mediaMetadata.title?.toString() ?: "",
+                                        it.mediaMetadata.artist?.toString() ?: ""
+                                    ) 
+                                }.toSet()
+                                
+                                var validCandidates = mergedCandidates.filter { candidate ->
+                                    val notPlayedInSession = !com.example.recommendation.RecommendationSessionManager.isTrackPlayed(
+                                        candidate.filePath, candidate.title, candidate.artist
+                                    )
+                                    val canonicalKey = com.example.recommendation.RecommendationSessionManager.getCanonicalSongKey(candidate.title, candidate.artist)
+                                    notPlayedInSession && canonicalKey !in relaxedRecentCanonicalKeys && candidate.filePath != currentSong.filePath
+                                }
+                                
+                                // Extreme fallback if empty
+                                if (validCandidates.isEmpty()) {
+                                    validCandidates = mergedCandidates.filter { candidate -> 
+                                        !com.example.recommendation.RecommendationSessionManager.isTrackPlayed(candidate.filePath, candidate.title, candidate.artist)
+                                    }
+                                }
+                                
+                                var finalCandidates = validCandidates
+                                
+                                // Language Fallback: Try Last.fm toptags if missing
+                                val knownLanguages = setOf("hindi", "tamil", "telugu", "kannada", "malayalam", "bengali", "marathi", "punjabi", "haryanvi", "rajasthani", "urdu", "english", "gujarati")
+                                for (candidate in finalCandidates) {
+                                    if (onlineSongLangCache[candidate.filePath].isNullOrBlank()) {
+                                        try {
+                                            val apiKey = com.example.data.remote.NetworkModule.lastFmApiKey
+                                            if (!apiKey.startsWith("PLACEHOLDER")) {
+                                                val res = com.example.data.remote.NetworkModule.lastFmApiService.getTrackInfo(candidate.title, candidate.artist, apiKey)
+                                                val tags = res.track?.toptags?.tag?.map { it.name.lowercase() } ?: emptyList()
+                                                val inferredLang = tags.firstOrNull { it in knownLanguages }
+                                                if (inferredLang != null) {
+                                                    onlineSongLangCache[candidate.filePath] = inferredLang
+                                                }
+                                            }
+                                        } catch (e: Exception) { /* skip */ }
+                                    }
+                                }
+                                
+                                // PROGRESSIVE HARD FILTERS
+                                // Language Filter
+                                val langFiltered = finalCandidates.filter { candidate ->
+                                    val candidateLang = onlineSongLangCache[candidate.filePath]?.lowercase()
+                                    val currentLangVal = targetLang?.lowercase() ?: onlineSongLangCache[currentSong.filePath]?.lowercase()
+                                    if (currentLangVal != null && candidateLang != null) {
+                                        candidateLang == currentLangVal ||
+                                        (currentLangVal == "hindi" && candidateLang == "urdu") ||
+                                        (currentLangVal == "urdu" && candidateLang == "hindi") ||
+                                        (currentLangVal == "haryanvi" && candidateLang == "hindi") ||
+                                        (currentLangVal == "punjabi" && candidateLang == "hindi")
+                                    } else false // HARD FILTER: exclude if language is still unknown
+                                }
+                                if (langFiltered.isNotEmpty()) finalCandidates = langFiltered
+                                
+                                // Mood Filter (currentMood already extracted above in pool section)
+                                val conflictingMoods = getConflictingMoodsSet(currentMood)
+                                val moodFiltered = finalCandidates.filter { candidate ->
+                                    val candidateMood = com.example.recommendation.MoodExtractionStrategy.getPrimaryMood(
+                                        candidate.title, candidate.album, candidate.artist
+                                    )
+                                    candidateMood !in conflictingMoods
+                                }
+                                if (moodFiltered.isNotEmpty()) finalCandidates = moodFiltered
+                                
+                                // Category Filter
+                                val categoryFiltered = finalCandidates.filter { candidate ->
+                                    val currentIsMovie = currentSong.album.let { alb ->
+                                        alb.isNotBlank() && !alb.equals("Unknown Album", ignoreCase = true) && !alb.equals(currentSong.title, ignoreCase = true)
+                                    }
+                                    val candidateIsMovie = candidate.album.let { alb ->
+                                        alb.isNotBlank() && !alb.equals("Unknown Album", ignoreCase = true) && !alb.equals(candidate.title, ignoreCase = true)
+                                    }
+                                    if (currentIsMovie) candidateIsMovie else true
+                                }
+                                if (categoryFiltered.isNotEmpty()) finalCandidates = categoryFiltered
+                                
+                                if (finalCandidates.isNotEmpty()) {
+                                    val candidateFeatures = finalCandidates.map { it.toTrackFeatures() }
+                                    var scores = recommendationEngine.scoreNext(
+                                        currentFeatures, 
+                                        candidateFeatures, 
+                                        candidateFeatures.size < 20,
+                                        userAffinityProfile.factorMultipliers,
+                                        userAffinityProfile.explorationMultiplier,
+                                        effectiveLanguage = targetLang
+                                    )
+
+                                    // Artist diversity penalty
+                                    val recentArtists = state.queue.takeLast(5).mapNotNull { it.mediaMetadata.artist?.toString()?.lowercase() }
+                                    scores = scores.map { score ->
+                                        val song = finalCandidates.find { it.filePath == score.trackId }
+                                        val artistLower = song?.artist?.lowercase() ?: ""
+                                        val artistRepeatCount = recentArtists.count { it == artistLower }
+                                        if (artistRepeatCount > 0) {
+                                            score.copy(fatiguePenalty = score.fatiguePenalty + (artistRepeatCount * 0.15f))
+                                        } else {
+                                            score
+                                        }
+                                    }.sortedByDescending { it.totalScore }
+                                    
+                                    // ═══════════════════════════════════════════════
+                                    // LOG TOP 10 CANDIDATES SCORES (DEV ONLY)
+                                    // ═══════════════════════════════════════════════
+                                    if (com.example.BuildConfig.DEBUG) {
+                                        android.util.Log.d("RecommendationScores", "--- Top 10 Candidate Scores (Session Locked Mood: $lockedGroup) ---")
+                                        scores.take(10).forEachIndexed { index, score ->
+                                            val song = finalCandidates.find { it.filePath == score.trackId }
+                                            val name = song?.title ?: score.trackId
+                                            val canonicalKey = com.example.recommendation.RecommendationSessionManager.getCanonicalSongKey(
+                                                song?.title ?: "", song?.artist ?: ""
+                                            )
+                                            
+                                            val hardFilters = mutableListOf<String>()
+                                            if (score.isHardFiltered) {
+                                                hardFilters.add(score.hardFilterReason ?: "UNKNOWN")
+                                            }
+                                            
+                                            val filterStr = if (hardFilters.isNotEmpty()) " [BLOCKED: ${hardFilters.joinToString()}]" else ""
+                                            
+                                            android.util.Log.d(
+                                                "RecommendationScores",
+                                                "#${index + 1}: '$name' -> Total: ${score.totalScore}$filterStr\n" +
+                                                "    CanonicalKey: $canonicalKey\n" +
+                                                "    Mood: ${score.moodConsistency} | Acoustic: ${score.acousticSimilarity} | Era: ${score.eraProximity}\n" +
+                                                "    Lang: ${score.languageConsistency} | Pref: ${score.userPreference} | Fatigue: ${score.fatiguePenalty}\n" +
+                                                "    Jitter: ${score.jitterBonus}"
+                                            )
+                                        }
+                                        android.util.Log.d("RecommendationScores", "-------------------------------")
+                                    }
+                                    
+                                    val topScore = scores.firstOrNull()
+                                    if (topScore != null) {
+                                        // Update the locked language only if we successfully picked a track
+                                        val pickedLang = onlineSongLangCache[topScore.trackId] ?: targetLang
+                                        if (pickedLang != null) {
+                                            lockedSessionLanguage = pickedLang
+                                        }
+
+                                        viewModelScope.launch {
+                                            sessionStateStore.persistLock(
+                                                com.example.recommendation.RecommendationSessionManager.getLockedMoodGroup(),
+                                                lockedSessionLanguage
+                                            )
+                                        }
+                                    }
+
+                                    val bestTrackId = topScore?.trackId
+                                    if (bestTrackId != null) {
+                                        val bestSong = finalCandidates.find { it.filePath == bestTrackId }
+                                        if (bestSong != null) {
+                                            musicController.addToQueue(bestSong)
+                                            
+                                            val mood = com.example.recommendation.MoodExtractionStrategy.getPrimaryMood(bestSong.title, bestSong.album, bestSong.artist)
+                                            com.example.recommendation.RecommendationSessionManager.registerAutoPick(mood)
+                                            
+                                            com.example.recommendation.RecommendationSessionManager.registerPlayedTrack(
+                                                bestSong.filePath, bestSong.title, bestSong.artist
+                                            )
+                                            
+                                            val bestScore = scores.first()
+                                            val factorScores = mapOf(
+                                                "moodConsistency" to bestScore.moodConsistency,
+                                                "acousticSimilarity" to bestScore.acousticSimilarity,
+                                                "timeOfDayFit" to bestScore.timeOfDayFit,
+                                                "eraProximity" to bestScore.eraProximity,
+                                                "userPreference" to bestScore.userPreference,
+                                                "fatiguePenalty" to bestScore.fatiguePenalty,
+                                                "jitterBonus" to bestScore.jitterBonus
+                                            )
+                                            val reason = when {
+                                                bestScore.moodConsistency >= 0.8f && bestScore.acousticSimilarity >= 0.6f -> "Perfect Match"
+                                                bestScore.acousticSimilarity >= 0.8f -> "Similar Artist"
+                                                bestScore.moodConsistency >= 0.8f -> "Mood Match"
+                                                bestScore.userPreference > 0.5f -> "Highly Preferred"
+                                                else -> "General Fallback"
+                                            }
+                                            com.example.recommendation.ListeningEventLogger.registerRecommendation(
+                                                trackId = bestSong.filePath,
+                                                context = com.example.recommendation.RecommendationContext(
+                                                    reason = reason,
+                                                    totalScore = bestScore.totalScore,
+                                                    factorScores = factorScores,
+                                                    moodTags = listOf(bestSong.toTrackFeatures().moodGenreTag),
+                                                    genreTags = emptyList()
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        } catch (e: Exception) {
+                            android.util.Log.e("RecommendationEngine", "Auto-enqueue failed", e)
+                        }
+                    }
+                }
             }
         }
     }
@@ -457,6 +932,10 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         val autoAdd = playlistPrefs.isAutoAddEnabled()
         musicController.playSong(song, allSongs, autoAdd)
         
+        // Anti-drift: Anchor session to manual pick
+        val mood = com.example.recommendation.MoodExtractionStrategy.getPrimaryMood(song.title, song.album, song.artist)
+        com.example.recommendation.RecommendationSessionManager.registerManualPick(mood)
+        
         // Fetch Phase 4 data
         fetchLyrics(song)
         fetchRecommendations(song)
@@ -487,6 +966,58 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     )
     
     val playbackState = musicController.playbackState
+
+    fun SongEntity.toTrackFeatures(): com.example.recommendation.TrackFeatures {
+        val year = onlineSongYearCache[filePath] ?: 2020 // fallback year
+        val lang = onlineSongLangCache[filePath]
+        return com.example.recommendation.TrackFeatures(
+            trackId = filePath,
+            title = title,
+            artist = artist,
+            album = album,
+            acousticClusterId = "default",
+            playCount = 1,
+            skipCount = 0,
+            lastPlayedTimestamp = System.currentTimeMillis(),
+            averageCompletionPercentage = 1.0f,
+            userRating = null,
+            moodGenreTag = com.example.recommendation.MoodExtractionStrategy.getPrimaryMood(title, album, artist),
+            releaseYear = year,
+            language = lang
+        )
+    }
+
+    private fun getConflictingMoodsSet(mood: String): Set<String> {
+        return when (mood.lowercase()) {
+            "romantic", "lullaby", "sleep", "sad" -> setOf("party", "hip-hop", "workout", "edm", "rock", "devotional", "happy", "energetic")
+            "party", "hip-hop", "workout", "edm", "rock", "happy", "energetic" -> setOf("romantic", "lullaby", "sleep", "sad", "classical", "devotional")
+            "devotional" -> setOf("party", "hip-hop", "workout", "edm", "rock", "romantic", "sad", "lullaby", "bollywood", "pop", "happy", "energetic")
+            else -> emptySet()
+        }
+    }
+
+    private fun determineTargetLanguage(lockedLang: String?): String? {
+        if (lockedLang == null) return null
+        val roll = (1..100).random()
+        return when (lockedLang) {
+            "hindi" -> {
+                if (roll <= 87) "hindi"
+                else if (roll <= 97) listOf("punjabi", "haryanvi", "rajasthani").random()
+                else listOf("tamil", "telugu", "english").random()
+            }
+            "punjabi", "haryanvi", "rajasthani" -> {
+                if (roll <= 87) lockedLang
+                else if (roll <= 97) "hindi"
+                else listOf("tamil", "telugu", "english").random()
+            }
+            "tamil", "telugu", "kannada", "malayalam" -> {
+                if (roll <= 87) lockedLang
+                else if (roll <= 97) listOf("tamil", "telugu", "kannada", "malayalam").filter { it != lockedLang }.random()
+                else listOf("hindi", "english").random()
+            }
+            else -> lockedLang
+        }
+    }
 
     fun scanMusic(folderUriString: String? = null) {
         viewModelScope.launch {
@@ -699,6 +1230,167 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 _recommendations.value = emptyList()
             }
         }
+    }
+    // ═══════════════════════════════════════════════
+    // DEV INSTRUMENTATION LOOP
+    // ═══════════════════════════════════════════════
+    private suspend fun runInstrumentationLoop() {
+        android.util.Log.i("DevInstrumentation", "=== STARTING 20-TRACK REAL SESSION SIMULATION ===")
+        
+        // Seed track: Random non-Romantic, non-English
+        val seedSongsResult = jioSaavnRepository.searchSongs("Diljit Dosanjh Lover")
+        var currentSong = seedSongsResult.getOrNull()?.firstOrNull()?.let { mapApiSongToEntity(it) }
+        
+        if (currentSong == null) {
+            android.util.Log.e("DevInstrumentation", "Failed to fetch seed track.")
+            return
+        }
+        
+        // Manual pick locks the mood
+        com.example.recommendation.RecommendationSessionManager.registerManualPick(
+            com.example.recommendation.MoodExtractionStrategy.getPrimaryMood(currentSong.title, currentSong.album, currentSong.artist)
+        )
+        
+        val sb = StringBuilder()
+        sb.append("=== STARTING 20-TRACK REAL SESSION SIMULATION ===\n")
+        
+        for (i in 1..20) {
+            sb.append("\n--- ITERATION $i ---\n")
+            sb.append("Current Track: '${currentSong!!.title}' by ${currentSong.artist}\n")
+            val lockedGroup = com.example.recommendation.RecommendationSessionManager.getLockedMoodGroup()
+            sb.append("Locked Mood Group: $lockedGroup\n")
+            
+            val fetchMood = lockedGroup ?: "Party"
+            
+            val moodLangSongs = jioSaavnRepository.searchSongsByMood(fetchMood, "punjabi", 25).getOrNull() ?: emptyList()
+            val moodOnlySongs = jioSaavnRepository.searchSongsByMood(fetchMood, null, 25).getOrNull() ?: emptyList()
+            val artistSongs = jioSaavnRepository.searchSongs(currentSong.artist).getOrNull() ?: emptyList()
+            
+            val mergedApi = (moodLangSongs + moodOnlySongs + artistSongs).distinctBy { it.id }.take(50).map { mapApiSongToEntity(it) }
+            
+            val apiKey = com.example.data.remote.NetworkModule.lastFmApiKey
+            if (!apiKey.startsWith("PLACEHOLDER")) {
+                val tagJobs = mergedApi.map { candidate ->
+                    viewModelScope.async {
+                        if (!onlineSongTagsCache.containsKey(candidate.filePath)) {
+                            try {
+                                val res = com.example.data.remote.NetworkModule.lastFmApiService.getTrackInfo(
+                                    candidate.title, candidate.artist, apiKey
+                                )
+                                val tags = res.track?.toptags?.tag?.map { it.name.lowercase() } ?: emptyList()
+                                onlineSongTagsCache[candidate.filePath] = tags
+                            } catch (e: Exception) {
+                                onlineSongTagsCache[candidate.filePath] = emptyList()
+                            }
+                        }
+                    }
+                }
+                tagJobs.awaitAll()
+            }
+            
+            val validCandidates = mergedApi.filter { 
+                val apiTags = onlineSongTagsCache[it.filePath] ?: emptyList()
+                !com.example.recommendation.DevotionalContentFilter.shouldExclude(it.title, it.album, it.artist, 
+                    com.example.recommendation.MoodExtractionStrategy.getPrimaryMood(it.title, it.album, it.artist), apiTags)
+            }.toMutableList()
+            
+            val devotionalExcluded = mergedApi.size - validCandidates.size
+            if (devotionalExcluded > 0) {
+                sb.append("Devotional Filter: Excluded $devotionalExcluded candidates.\n")
+            }
+            
+            val candidateFeatures = validCandidates.map { it.toTrackFeatures() }
+            val scores = recommendationEngine.scoreNext(
+                currentSong.toTrackFeatures(),
+                candidateFeatures,
+                false,
+                emptyMap(),
+                0.5f
+            ).sortedByDescending { it.totalScore }
+            
+            val top5 = scores.take(5)
+            sb.append("Top 5 Candidates:\n")
+            for ((idx, score) in top5.withIndex()) {
+                val song = validCandidates.find { it.filePath == score.trackId }
+                val title = song?.title ?: "Unknown"
+                val artist = song?.artist ?: "Unknown"
+                val canonical = com.example.recommendation.RecommendationSessionManager.getCanonicalSongKey(title, artist)
+                
+                val hardFilters = mutableListOf<String>()
+                if (score.languageConsistency <= -9999.0f) hardFilters.add("LANG")
+                if (score.eraProximity <= -9999.0f) hardFilters.add("ERA")
+                if (score.moodConsistency <= -9999.0f) hardFilters.add("MOOD")
+                val filterStr = if (hardFilters.isNotEmpty()) " [BLOCKED: ${hardFilters.joinToString()}]" else ""
+                
+                sb.append("  ${idx+1}. '$title' by $artist (Canonical: $canonical)\n")
+                sb.append("     TotalScore: ${score.totalScore}$filterStr | Mood: ${score.moodConsistency} | Era: ${score.eraProximity} | Lang: ${score.languageConsistency}\n")
+            }
+            
+            val winnerScore = top5.firstOrNull()
+            if (winnerScore == null || winnerScore.totalScore <= -9999.0f) {
+                sb.append(">> HALT: Pool exhausted or all blocked.\n")
+                break
+            }
+            
+            val winnerSong = validCandidates.find { it.filePath == winnerScore.trackId }!!
+            sb.append(">> WINNER PICKED: '${winnerSong.title}'\n")
+            
+            // Advance simulation
+            com.example.recommendation.RecommendationSessionManager.registerPlayedTrack(winnerSong.filePath, winnerSong.title, winnerSong.artist)
+            com.example.recommendation.RecommendationSessionManager.registerAutoPick(
+                com.example.recommendation.MoodExtractionStrategy.getPrimaryMood(winnerSong.title, winnerSong.album, winnerSong.artist)
+            )
+            currentSong = winnerSong
+        }
+        
+        sb.append("\n=== END SIMULATION ===\n")
+        android.util.Log.i("DevInstrumentation", sb.toString())
+    }
+
+    override fun onCleared() {
+        super.onCleared()
+        musicController.release()
+    }
+}
+            ).sortedByDescending { it.totalScore }
+            
+            val top5 = scores.take(5)
+            sb.append("Top 5 Candidates:\n")
+            for ((idx, score) in top5.withIndex()) {
+                val song = validCandidates.find { it.filePath == score.trackId }
+                val title = song?.title ?: "Unknown"
+                val artist = song?.artist ?: "Unknown"
+                val canonical = com.example.recommendation.RecommendationSessionManager.getCanonicalSongKey(title, artist)
+                
+                val hardFilters = mutableListOf<String>()
+                if (score.languageConsistency <= -9999.0f) hardFilters.add("LANG")
+                if (score.eraProximity <= -9999.0f) hardFilters.add("ERA")
+                if (score.moodConsistency <= -9999.0f) hardFilters.add("MOOD")
+                val filterStr = if (hardFilters.isNotEmpty()) " [BLOCKED: ${hardFilters.joinToString()}]" else ""
+                
+                sb.append("  ${idx+1}. '$title' by $artist (Canonical: $canonical)\n")
+                sb.append("     TotalScore: ${score.totalScore}$filterStr | Mood: ${score.moodConsistency} | Era: ${score.eraProximity} | Lang: ${score.languageConsistency}\n")
+            }
+            
+            val winnerScore = top5.firstOrNull()
+            if (winnerScore == null || winnerScore.totalScore <= -9999.0f) {
+                sb.append(">> HALT: Pool exhausted or all blocked.\n")
+                break
+            }
+            
+            val winnerSong = validCandidates.find { it.filePath == winnerScore.trackId }!!
+            sb.append(">> WINNER PICKED: '${winnerSong.title}'\n")
+            
+            // Advance simulation
+            com.example.recommendation.RecommendationSessionManager.registerPlayedTrack(winnerSong.filePath, winnerSong.title, winnerSong.artist)
+            com.example.recommendation.RecommendationSessionManager.registerAutoPick(
+                com.example.recommendation.MoodExtractionStrategy.getPrimaryMood(winnerSong.title, winnerSong.album, winnerSong.artist)
+            )
+            currentSong = winnerSong
+        }
+        
+        sb.append("\n=== END SIMULATION ===\n")
+        android.util.Log.i("DevInstrumentation", sb.toString())
     }
 
     override fun onCleared() {

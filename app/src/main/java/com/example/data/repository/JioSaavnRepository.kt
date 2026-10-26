@@ -92,6 +92,22 @@ class JioSaavnRepository {
         }
     }
 
+    /** Search songs by mood/genre tag, optionally filtered by language */
+    suspend fun searchSongsByMood(mood: String, language: String? = null, limit: Int = 25): Result<List<ApiSong>> = withContext(Dispatchers.IO) {
+        try {
+            val query = if (!language.isNullOrBlank()) "$mood $language songs" else "$mood songs"
+            val response = apiService.searchSongs(query, limit)
+            if (response.data?.results != null) {
+                Result.success(response.data.results)
+            } else {
+                Result.failure(Exception("No mood-based results found"))
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Result.failure(e)
+        }
+    }
+
     /** Fetch featured playlists by searching popular terms */
     suspend fun getFeaturedPlaylists(): Result<List<ApiPlaylistItem>> = withContext(Dispatchers.IO) {
         try {

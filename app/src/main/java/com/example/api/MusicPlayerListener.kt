@@ -7,4 +7,5 @@ interface MusicPlayerListener {
     fun onShuffleChanged(enabled: Boolean)
     fun onRepeatModeChanged(mode: RepeatMode)
     fun onError(message: String)
+    fun onTrackSkippedEarly(songId: String) {}
 }

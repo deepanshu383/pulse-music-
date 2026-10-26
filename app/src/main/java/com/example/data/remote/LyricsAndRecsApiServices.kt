@@ -19,4 +19,11 @@ interface LastFmApiService {
         @Query("artist") artist: String,
         @Query("api_key") apiKey: String = "PLACEHOLDER_LASTFM_KEY" // Will be updated
     ): LastFmResponse
+
+    @GET("?method=track.getInfo&format=json")
+    suspend fun getTrackInfo(
+        @Query("track") track: String,
+        @Query("artist") artist: String,
+        @Query("api_key") apiKey: String = "PLACEHOLDER_LASTFM_KEY" // Will be updated
+    ): LastFmTrackInfoResponse
 }

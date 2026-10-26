@@ -38,6 +38,9 @@ class MainActivity : ComponentActivity() {
 
                 val folderUri by viewModel.folderUri.collectAsStateWithLifecycle()
                 
+                val prefs = androidx.compose.runtime.remember { com.example.data.local.UserPreferencesManager(this@MainActivity) }
+                var showColdStart by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(!prefs.hasCompletedColdStart()) }
+                
                 LaunchedEffect(permissionState.status) {
                     if (!permissionState.status.isGranted) {
                         permissionState.launchPermissionRequest()
@@ -69,6 +72,20 @@ class MainActivity : ComponentActivity() {
                         } else {
                             LaunchedEffect(folderUri) {
                                 viewModel.scanMusic(folderUri)
+                            }
+                            if (showColdStart) {
+                                com.example.ui.ColdStartDialog(
+                                    onDismiss = {
+                                        prefs.setColdStartCompleted(true)
+                                        showColdStart = false
+                                    },
+                                    onSavePreferences = { artists, langs ->
+                                        prefs.setPreferredArtists(artists)
+                                        prefs.setPreferredLanguages(langs)
+                                        prefs.setColdStartCompleted(true)
+                                        showColdStart = false
+                                    }
+                                )
                             }
                             MainScreen(viewModel)
                         }
