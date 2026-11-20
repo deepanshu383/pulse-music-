@@ -2,19 +2,23 @@ package com.example.ui
 
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.R
 import com.example.auth.FirebaseAuthManager
+import com.example.ui.theme.*
 import kotlinx.coroutines.launch
 
 @Composable
@@ -34,45 +38,35 @@ fun LoginScreen(
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
-        contentAlignment = Alignment.Center
-    ) {
+    FluidBackdrop {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(24.dp)
+            verticalArrangement = Arrangement.Center,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(24.dp)
         ) {
-            // App Icon Placeholder (Assuming there is an ic_launcher)
-            Box(
-                modifier = Modifier
-                    .size(120.dp)
-                    .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(24.dp)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text("🎵", fontSize = 60.sp)
-            }
+            DynamicRanjhaLogo(size = 130.dp)
             
             Spacer(modifier = Modifier.height(24.dp))
             
             Text(
-                text = "Pulse Music",
-                fontSize = 32.sp,
+                text = "Ranjha",
+                fontSize = 36.sp,
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.onBackground
             )
             
             Text(
                 text = "Your music, anywhere.",
-                fontSize = 16.sp,
-                color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.6f)
+                fontSize = 15.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
             
-            Spacer(modifier = Modifier.height(64.dp))
+            Spacer(modifier = Modifier.height(60.dp))
 
             if (isLoading) {
-                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                CircularProgressIndicator(color = RanjhaNeonPink)
             } else {
                 Button(
                     onClick = {
@@ -89,32 +83,37 @@ fun LoginScreen(
                             isLoading = false
                         }
                     },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
                     colors = ButtonDefaults.buttonColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant,
-                        contentColor = MaterialTheme.colorScheme.onSurfaceVariant
+                        containerColor = RanjhaNeonPink
                     ),
-                    shape = RoundedCornerShape(28.dp)
+                    shape = RoundedCornerShape(24.dp),
+                    modifier = Modifier
+                        .fillMaxWidth(0.85f)
+                        .height(50.dp)
                 ) {
-                    Text("Sign in with Google", fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                    Text(
+                        text = "Sign in with Google",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color.White
+                    )
                 }
+
+                Spacer(modifier = Modifier.height(14.dp))
                 
-                Spacer(modifier = Modifier.height(12.dp))
-                
-                // B3: Skip Login / Guest Mode
+                // Skip Login / Guest Mode
                 OutlinedButton(
                     onClick = { onLoginSuccess() },
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    shape = RoundedCornerShape(28.dp),
+                        .fillMaxWidth(0.85f)
+                        .height(50.dp),
+                    shape = RoundedCornerShape(24.dp),
                     colors = ButtonDefaults.outlinedButtonColors(
-                        contentColor = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.7f)
-                    )
+                        contentColor = Color.White.copy(alpha = 0.8f)
+                    ),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0x40FFFFFF))
                 ) {
-                    Text("Continue as Guest", fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    Text("Continue as Guest", fontSize = 15.sp, fontWeight = FontWeight.Medium)
                 }
             }
 
@@ -122,7 +121,7 @@ fun LoginScreen(
                 Spacer(modifier = Modifier.height(16.dp))
                 Text(
                     text = errorMessage!!,
-                    color = MaterialTheme.colorScheme.error,
+                    color = ErrorRed,
                     fontSize = 14.sp
                 )
             }

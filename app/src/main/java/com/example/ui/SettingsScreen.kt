@@ -4,6 +4,8 @@ import android.content.Intent
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -14,6 +16,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -32,10 +35,13 @@ fun SettingsScreen(
     isSaveQueueEnabled: Boolean = true,
     onSaveQueueChange: (Boolean) -> Unit = {},
     isAutoPlayNextEnabled: Boolean = true,
-    onAutoPlayNextChange: (Boolean) -> Unit = {}
+    onAutoPlayNextChange: (Boolean) -> Unit = {},
+    currentThemeMode: AppThemeMode = AppThemeMode.MIDNIGHT,
+    onThemeChange: (AppThemeMode) -> Unit = {}
 ) {
     val context = LocalContext.current
     var showResetDialog by remember { mutableStateOf(false) }
+    var showThemeDialog by remember { mutableStateOf(false) }
 
     val folderPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocumentTree()
@@ -70,7 +76,7 @@ fun SettingsScreen(
 
         Card(
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = DarkSurfaceContainer),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
@@ -124,7 +130,7 @@ fun SettingsScreen(
 
         Card(
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = DarkSurfaceContainer),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(vertical = 4.dp)) {
@@ -171,13 +177,14 @@ fun SettingsScreen(
 
         Card(
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = DarkSurfaceContainer),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(vertical = 4.dp)) {
-                SettingsInfoRow(
+                SettingsClickableRow(
                     title = "Theme",
-                    value = "Dark Mode"
+                    value = currentThemeMode.displayName,
+                    onClick = { showThemeDialog = true }
                 )
 
                 HorizontalDivider(
@@ -202,7 +209,7 @@ fun SettingsScreen(
 
         Card(
             shape = RoundedCornerShape(16.dp),
-            colors = CardDefaults.cardColors(containerColor = DarkSurfaceContainer),
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
             modifier = Modifier.fillMaxWidth()
         ) {
             Column(modifier = Modifier.padding(16.dp)) {
@@ -239,7 +246,7 @@ fun SettingsScreen(
     if (showResetDialog) {
         AlertDialog(
             onDismissRequest = { showResetDialog = false },
-            containerColor = DarkSurfaceContainer,
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
             title = {
                 Text(
                     "Reset All Preferences?",
@@ -272,6 +279,72 @@ fun SettingsScreen(
             dismissButton = {
                 TextButton(onClick = { showResetDialog = false }) {
                     Text("Cancel", color = TextSecondary)
+                }
+            }
+        )
+    }
+
+    // Theme Selection Dialog
+    if (showThemeDialog) {
+        AlertDialog(
+            onDismissRequest = { showThemeDialog = false },
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
+            title = {
+                Text(
+                    "Choose Theme",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
+                )
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    AppThemeMode.entries.forEach { mode ->
+                        val isSelected = mode == currentThemeMode
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable {
+                                    onThemeChange(mode)
+                                    showThemeDialog = false
+                                }
+                                .background(if (isSelected) PulseAccent.copy(alpha = 0.15f) else androidx.compose.ui.graphics.Color.Transparent)
+                                .padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            RadioButton(
+                                selected = isSelected,
+                                onClick = {
+                                    onThemeChange(mode)
+                                    showThemeDialog = false
+                                },
+                                colors = RadioButtonDefaults.colors(
+                                    selectedColor = PulseAccent,
+                                    unselectedColor = TextSecondary
+                                )
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    text = mode.displayName,
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                                Text(
+                                    text = mode.description,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = TextSecondary
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showThemeDialog = false }) {
+                    Text("Close", color = PulseAccent)
                 }
             }
         )
@@ -337,6 +410,50 @@ private fun SettingsToggleRow(
                 uncheckedTrackColor = DarkSurfaceVariant
             )
         )
+    }
+}
+
+@Composable
+private fun SettingsClickableRow(
+    title: String,
+    value: String,
+    onClick: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Text(
+                text = "Tap to switch theme",
+                style = MaterialTheme.typography.bodySmall,
+                color = TextTertiary
+            )
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = PulseAccent
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Icon(
+                Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = TextTertiary,
+                modifier = Modifier.size(18.dp)
+            )
+        }
     }
 }
 

@@ -27,7 +27,12 @@ class MainActivity : ComponentActivity() {
         // C1: Edge-to-edge immersive UI
         enableEdgeToEdge()
         setContent {
-            MyApplicationTheme {
+            val prefs = androidx.compose.runtime.remember { com.example.data.local.UserPreferencesManager(this@MainActivity) }
+            var currentThemeMode by androidx.compose.runtime.remember {
+                androidx.compose.runtime.mutableStateOf(com.example.ui.theme.AppThemeMode.fromId(prefs.getThemeMode()))
+            }
+
+            MyApplicationTheme(themeMode = currentThemeMode) {
                 val permissionState = rememberPermissionState(
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                         Manifest.permission.READ_MEDIA_AUDIO
@@ -37,8 +42,6 @@ class MainActivity : ComponentActivity() {
                 )
 
                 val folderUri by viewModel.folderUri.collectAsStateWithLifecycle()
-                
-                val prefs = androidx.compose.runtime.remember { com.example.data.local.UserPreferencesManager(this@MainActivity) }
                 var showColdStart by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(!prefs.hasCompletedColdStart()) }
                 
                 LaunchedEffect(permissionState.status) {
@@ -54,7 +57,13 @@ class MainActivity : ComponentActivity() {
                     ) 
                 }
 
-                if (!isLoggedIn) {
+                var showSplash by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(true) }
+
+                if (showSplash) {
+                    com.example.ui.SplashScreen(
+                        onLoaded = { showSplash = false }
+                    )
+                } else if (!isLoggedIn) {
                     com.example.ui.LoginScreen(
                         onLoginSuccess = { 
                             isLoggedIn = true 
@@ -87,7 +96,14 @@ class MainActivity : ComponentActivity() {
                                     }
                                 )
                             }
-                            MainScreen(viewModel)
+                            MainScreen(
+                                viewModel = viewModel,
+                                currentThemeMode = currentThemeMode,
+                                onThemeChange = { newMode ->
+                                    currentThemeMode = newMode
+                                    prefs.setThemeMode(newMode.id)
+                                }
+                            )
                         }
                     } else {
                         com.example.ui.SetupScreen(

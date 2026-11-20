@@ -1,1 +1,0 @@
-sed -i 's/fun PlaylistDetailsScreen(/fun PlaylistDetailsScreen(\n    initialSortOrder: PlaylistSortOrder,\n    initialViewMode: PlaylistViewMode,\n    onSortOrderChange: (PlaylistSortOrder) -> Unit,\n    onViewModeChange: (PlaylistViewMode) -> Unit,/' app/src/main/java/com/example/ui/PlaylistDetailsScreen.kt

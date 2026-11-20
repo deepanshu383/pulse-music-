@@ -12,6 +12,7 @@ class VerificationTest {
 
     @Before
     fun setup() {
+        RecommendationSessionManager.resetSession()
         engine = DefaultRecommendationEngine()
     }
 

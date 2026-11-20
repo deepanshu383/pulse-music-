@@ -53,7 +53,7 @@ data class RecommendationScore(
     val isHardFiltered: Boolean = false,
     val hardFilterReason: String? = null
 ) {
-    data class Filtered(val hardFiltered: Boolean, val score: Float = 0.0f, val reason: String? = null)
+    data class Filtered(val hardFiltered: Boolean, val score: Float = if (hardFiltered) -9999.0f else 0.0f, val reason: String? = null)
 
     /**
      * Computed total score (weighted sum).

@@ -77,14 +77,73 @@ class JioSaavnRepository {
         }
     }
 
-    /** Fetch trending songs by searching a popular keyword */
-    suspend fun getTrendingSongs(): Result<List<ApiSong>> = withContext(Dispatchers.IO) {
+    suspend fun getSongDetails(songId: String): Result<List<ApiSong>> = withContext(Dispatchers.IO) {
         try {
-            val response = apiService.searchSongs(query = "trending", limit = 20)
-            if (response.data?.results != null) {
-                Result.success(response.data.results)
+            val response = apiService.getSongDetails(songId)
+            if (response.data != null) {
+                Result.success(response.data)
             } else {
-                Result.failure(Exception("No trending songs found"))
+                Result.failure(Exception("Song details not found"))
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Result.failure(e)
+        }
+    }
+
+    private val trendingQueryPool = listOf(
+        "Top 50 Hindi Hits",
+        "Trending Hindi Hits 2025",
+        "Latest Punjabi Pop Hits",
+        "Bollywood Top Chartbusters",
+        "Arijit Singh Latest Hits",
+        "Viral Instagram Reels Hindi",
+        "Romantic Melodies Bollywood",
+        "Desi Hip Hop Hits",
+        "Superhit Punjabi 2025",
+        "New Hindi Songs 2025",
+        "Top Indian Pop Hits"
+    )
+
+    private val featuredPlaylistPool = listOf(
+        "Top Hindi Hits",
+        "Punjabi Chartbusters",
+        "Bollywood Romance",
+        "Acoustic Hindi",
+        "Chill Lounge Bollywood",
+        "Party Mashup Hindi",
+        "Soulful Sufi Hits",
+        "90s Romantic Hits"
+    )
+
+    /** Fetch trending songs deterministically for the current 1-hour time window */
+    suspend fun getTrendingSongs(
+        hourSeed: Long = System.currentTimeMillis() / 3_600_000L
+    ): Result<List<ApiSong>> = withContext(Dispatchers.IO) {
+        try {
+            val idx1 = ((hourSeed % trendingQueryPool.size) + trendingQueryPool.size).toInt() % trendingQueryPool.size
+            val idx2 = (idx1 + 3) % trendingQueryPool.size
+            val query1 = trendingQueryPool[idx1]
+            val query2 = trendingQueryPool[idx2]
+
+            val res1 = try { apiService.searchSongs(query = query1, limit = 20).data?.results } catch (e: Exception) { null }
+            val res2 = try { apiService.searchSongs(query = query2, limit = 20).data?.results } catch (e: Exception) { null }
+
+            val combined = mutableListOf<ApiSong>()
+            if (!res1.isNullOrEmpty()) combined.addAll(res1)
+            if (!res2.isNullOrEmpty()) combined.addAll(res2)
+
+            if (combined.isNotEmpty()) {
+                val distinctSongs = combined.distinctBy { it.id.ifBlank { it.name } }
+                val rng = kotlin.random.Random(hourSeed)
+                Result.success(distinctSongs.shuffled(rng).take(25))
+            } else {
+                val fallback = apiService.searchSongs(query = "latest hindi hits", limit = 25)
+                if (fallback.data?.results != null) {
+                    Result.success(fallback.data.results)
+                } else {
+                    Result.failure(Exception("No trending songs found"))
+                }
             }
         } catch (e: Exception) {
             e.printStackTrace()
@@ -108,14 +167,24 @@ class JioSaavnRepository {
         }
     }
 
-    /** Fetch featured playlists by searching popular terms */
-    suspend fun getFeaturedPlaylists(): Result<List<ApiPlaylistItem>> = withContext(Dispatchers.IO) {
+    /** Fetch featured playlists deterministically for the current 1-hour time window */
+    suspend fun getFeaturedPlaylists(
+        hourSeed: Long = System.currentTimeMillis() / 3_600_000L
+    ): Result<List<ApiPlaylistItem>> = withContext(Dispatchers.IO) {
         try {
-            val response = apiService.searchPlaylists(query = "bollywood hits", limit = 20)
-            if (response.data?.results != null) {
-                Result.success(response.data.results)
+            val idx = ((hourSeed % featuredPlaylistPool.size) + featuredPlaylistPool.size).toInt() % featuredPlaylistPool.size
+            val query = featuredPlaylistPool[idx]
+            val response = apiService.searchPlaylists(query = query, limit = 15)
+            if (response.data?.results != null && response.data.results.isNotEmpty()) {
+                val rng = kotlin.random.Random(hourSeed + 997L)
+                Result.success(response.data.results.shuffled(rng))
             } else {
-                Result.failure(Exception("No featured playlists found"))
+                val fallback = apiService.searchPlaylists(query = "top bollywood hits", limit = 15)
+                if (fallback.data?.results != null) {
+                    Result.success(fallback.data.results)
+                } else {
+                    Result.failure(Exception("No featured playlists found"))
+                }
             }
         } catch (e: Exception) {
             e.printStackTrace()

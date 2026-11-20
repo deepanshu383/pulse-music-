@@ -14,6 +14,8 @@ debug.keystore
 app/google-services.json
 
 # Scratch and temporary tools
+.venv/
+requirements.txt
 cfr.jar
 decompiled_MainViewModel.java
 decompiled_ui/

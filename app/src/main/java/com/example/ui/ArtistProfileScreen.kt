@@ -40,7 +40,10 @@ fun ArtistProfileScreen(
     onBack: () -> Unit,
     onSongClick: (SongEntity, List<SongEntity>) -> Unit,
     onAddToQueue: (SongEntity) -> Unit = {},
-    onAddToPlaylist: (SongEntity) -> Unit = {}
+    onAddToPlaylist: (SongEntity) -> Unit = {},
+    currentSongId: String? = null,
+    isPlaying: Boolean = false,
+    onTogglePlayPause: () -> Unit = {}
 ) {
     Box(
         modifier = Modifier
@@ -90,7 +93,15 @@ fun ArtistProfileScreen(
                     items(artistSongs, key = { "song_${it.filePath}" }) { song ->
                         ArtistSongItem(
                             song = song,
-                            onClick = { onSongClick(song, artistSongs) },
+                            isCurrentTrack = currentSongId != null && song.filePath == currentSongId,
+                            isActivelyPlaying = currentSongId != null && song.filePath == currentSongId && isPlaying,
+                            onClick = {
+                                if (currentSongId != null && song.filePath == currentSongId) {
+                                    onTogglePlayPause()
+                                } else {
+                                    onSongClick(song, artistSongs)
+                                }
+                            },
                             onAddToQueue = { onAddToQueue(song) },
                             onAddToPlaylist = { onAddToPlaylist(song) }
                         )
@@ -263,6 +274,8 @@ private fun ArtistHeroHeader(
 @Composable
 private fun ArtistSongItem(
     song: SongEntity,
+    isCurrentTrack: Boolean = false,
+    isActivelyPlaying: Boolean = false,
     onClick: () -> Unit,
     onAddToQueue: () -> Unit,
     onAddToPlaylist: () -> Unit
@@ -328,7 +341,7 @@ private fun ArtistSongItem(
                     text = song.title,
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.SemiBold,
-                    color = TextPrimary,
+                    color = if (isCurrentTrack) RanjhaNeonPink else TextPrimary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -339,6 +352,26 @@ private fun ArtistSongItem(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+
+            if (isActivelyPlaying) {
+                AudioWaveformVisualizer(
+                    isPlaying = true,
+                    barCount = 10,
+                    activeColor = RanjhaCyan,
+                    minHeight = 4.dp,
+                    maxHeight = 16.dp
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+            } else if (isCurrentTrack) {
+                AudioWaveformVisualizer(
+                    isPlaying = false,
+                    barCount = 10,
+                    activeColor = TextSecondary,
+                    minHeight = 4.dp,
+                    maxHeight = 16.dp
+                )
+                Spacer(modifier = Modifier.width(6.dp))
             }
 
             Box {

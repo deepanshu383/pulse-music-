@@ -33,4 +33,9 @@ interface JioSaavnApiService {
         @Query("id") playlistId: String,
         @Query("limit") limit: Int = 50
     ): OnlinePlaylistDetailResponse
+
+    @GET("api/songs/{id}")
+    suspend fun getSongDetails(
+        @Path("id") songId: String
+    ): SongDetailResponse
 }

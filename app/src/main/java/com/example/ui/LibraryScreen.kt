@@ -64,7 +64,7 @@ fun LibraryScreen(
     }
 
     Scaffold(
-        containerColor = DarkBackground,
+        containerColor = MaterialTheme.colorScheme.background,
         floatingActionButton = {
             Box {
                 FloatingActionButton(
@@ -108,16 +108,18 @@ fun LibraryScreen(
                 }
             }
 
-            // Downloaded Songs Card
+            // ─────────────────────────────────────────
+            // 1. All Songs (Auto Library Playlist) Card
+            // ─────────────────────────────────────────
             item {
                 Card(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp, vertical = 6.dp)
-                        .clickable { /* Could navigate to a filtered view */ },
+                        .clickable { onPlaylistClick(-1L) },
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(
-                        containerColor = DarkSurfaceContainer
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer
                     )
                 ) {
                     Row(
@@ -128,14 +130,14 @@ fun LibraryScreen(
                     ) {
                         Surface(
                             shape = RoundedCornerShape(12.dp),
-                            color = PulseAccent.copy(alpha = 0.15f),
+                            color = RanjhaNeonPink.copy(alpha = 0.18f),
                             modifier = Modifier.size(48.dp)
                         ) {
                             Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
                                 Icon(
-                                    Icons.Default.Download,
+                                    Icons.Default.QueueMusic,
                                     contentDescription = null,
-                                    tint = PulseAccent,
+                                    tint = RanjhaNeonPink,
                                     modifier = Modifier.size(24.dp)
                                 )
                             }
@@ -143,13 +145,13 @@ fun LibraryScreen(
                         Spacer(modifier = Modifier.width(16.dp))
                         Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = "Downloaded Songs",
+                                text = "All Songs",
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
-                                text = "${songs.size} songs • Local Files",
+                                text = "${songs.size} songs • Auto Library",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = TextSecondary
                             )
@@ -163,10 +165,77 @@ fun LibraryScreen(
                 }
             }
 
-            // Playlist Cards
+            // ─────────────────────────────────────────
+            // 2. Downloaded Songs Card
+            // ─────────────────────────────────────────
+            item {
+                val downloadedCount = remember(songs) { songs.count { !it.isOnline } }
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 20.dp, vertical = 6.dp)
+                        .clickable { onPlaylistClick(-2L) },
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = RanjhaCyan.copy(alpha = 0.18f),
+                            modifier = Modifier.size(48.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center, modifier = Modifier.fillMaxSize()) {
+                                Icon(
+                                    Icons.Default.Download,
+                                    contentDescription = null,
+                                    tint = RanjhaCyan,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(16.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Downloaded Songs",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Text(
+                                text = "$downloadedCount songs • Local Files",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = TextSecondary
+                            )
+                        }
+                        Icon(
+                            Icons.Default.ChevronRight,
+                            contentDescription = null,
+                            tint = TextTertiary
+                        )
+                    }
+                }
+            }
+
+            // ─────────────────────────────────────────
+            // 3. User Playlists Section
+            // ─────────────────────────────────────────
             if (playlists.isNotEmpty()) {
                 item {
-                    Spacer(modifier = Modifier.height(8.dp))
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text(
+                        text = "Custom Playlists (${playlists.size})",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = TextSecondary,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
+                    )
                 }
 
                 items(playlists) { playlist ->
@@ -176,184 +245,38 @@ fun LibraryScreen(
                         modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)
                     )
                 }
-            }
-
-            // Sort & View Bar
-            item {
-                Spacer(modifier = Modifier.height(16.dp))
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Sort button
-                    Box {
-                        Surface(
-                            onClick = { sortMenuExpanded = true },
-                            shape = RoundedCornerShape(20.dp),
-                            color = DarkSurfaceContainer
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    Icons.Default.Sort,
-                                    contentDescription = "Sort",
-                                    tint = TextSecondary,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = "Sort",
-                                    style = MaterialTheme.typography.labelLarge,
-                                    color = TextSecondary
-                                )
-                            }
-                        }
-                        DropdownMenu(
-                            expanded = sortMenuExpanded,
-                            onDismissRequest = { sortMenuExpanded = false }
-                        ) {
-                            PlaylistSortOrder.values().forEach { order ->
-                                DropdownMenuItem(
-                                    text = { Text(order.displayName) },
-                                    onClick = {
-                                        sortOrder = order
-                                        onSortOrderChange(order)
-                                        sortMenuExpanded = false
-                                    },
-                                    leadingIcon = {
-                                        if (sortOrder == order) {
-                                            Icon(Icons.Default.Check, contentDescription = null, tint = PulseAccent)
-                                        }
-                                    }
-                                )
-                            }
-                        }
-                    }
-
-                    // View mode toggles
-                    Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                        ViewModeButton(
-                            icon = Icons.Default.ViewList,
-                            isSelected = viewMode == PlaylistViewMode.LIST,
-                            onClick = {
-                                viewMode = PlaylistViewMode.LIST
-                                onViewModeChange(PlaylistViewMode.LIST)
-                            }
-                        )
-                        ViewModeButton(
-                            icon = Icons.Default.GridView,
-                            isSelected = viewMode == PlaylistViewMode.GRID,
-                            onClick = {
-                                viewMode = PlaylistViewMode.GRID
-                                onViewModeChange(PlaylistViewMode.GRID)
-                            }
-                        )
-                        ViewModeButton(
-                            icon = Icons.Default.ViewAgenda,
-                            isSelected = viewMode == PlaylistViewMode.CARD,
-                            onClick = {
-                                viewMode = PlaylistViewMode.CARD
-                                onViewModeChange(PlaylistViewMode.CARD)
-                            }
-                        )
-                    }
-                }
-            }
-
-            // All Songs section
-            item {
-                Text(
-                    text = "All Songs",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onBackground,
-                    modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
-                )
-            }
-
-            if (sortedSongs.isEmpty()) {
+            } else {
                 item {
+                    Spacer(modifier = Modifier.height(24.dp))
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(32.dp),
+                            .padding(horizontal = 20.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Icon(
-                                Icons.Default.MusicOff,
+                                Icons.Default.PlaylistAdd,
                                 contentDescription = null,
                                 tint = TextTertiary,
-                                modifier = Modifier.size(48.dp)
+                                modifier = Modifier.size(44.dp)
                             )
-                            Spacer(modifier = Modifier.height(12.dp))
+                            Spacer(modifier = Modifier.height(8.dp))
                             Text(
-                                "No songs found.",
-                                style = MaterialTheme.typography.bodyLarge,
+                                "No custom playlists yet",
+                                style = MaterialTheme.typography.bodyMedium,
                                 color = TextSecondary
                             )
-                        }
-                    }
-                }
-            } else {
-                when (viewMode) {
-                    PlaylistViewMode.LIST -> {
-                        items(sortedSongs) { song ->
-                            PlaylistSongItem(
-                                song = song,
-                                viewMode = PlaylistViewMode.LIST,
-                                onSongClick = { onSongClick(song) },
-                                onRemove = { /* Not applicable here */ },
-                                onAddToQueue = { onAddToQueue(song) },
-                                onAddToPlaylist = { onAddToPlaylist(song) },
-                                hapticFeedback = { haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
-                            )
-                        }
-                    }
-                    PlaylistViewMode.GRID -> {
-                        val chunked = sortedSongs.chunked(2)
-                        items(chunked) { rowSongs ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 12.dp)
+                            Spacer(modifier = Modifier.height(12.dp))
+                            OutlinedButton(
+                                onClick = { showCreateDialog = true },
+                                shape = RoundedCornerShape(12.dp),
+                                colors = ButtonDefaults.outlinedButtonColors(contentColor = PulseAccent),
+                                border = ButtonDefaults.outlinedButtonBorder(enabled = true)
                             ) {
-                                rowSongs.forEach { song ->
-                                    Box(modifier = Modifier.weight(1f)) {
-                                        PlaylistSongItem(
-                                            song = song,
-                                            viewMode = PlaylistViewMode.GRID,
-                                            onSongClick = { onSongClick(song) },
-                                            onRemove = { },
-                                            onAddToQueue = { onAddToQueue(song) },
-                                            onAddToPlaylist = { onAddToPlaylist(song) },
-                                            hapticFeedback = { haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
-                                        )
-                                    }
-                                }
-                                if (rowSongs.size == 1) {
-                                    Spacer(modifier = Modifier.weight(1f))
-                                }
-                            }
-                        }
-                    }
-                    PlaylistViewMode.CARD -> {
-                        items(sortedSongs) { song ->
-                            Box(modifier = Modifier.padding(horizontal = 20.dp, vertical = 4.dp)) {
-                                PlaylistSongItem(
-                                    song = song,
-                                    viewMode = PlaylistViewMode.CARD,
-                                    onSongClick = { onSongClick(song) },
-                                    onRemove = { },
-                                    onAddToQueue = { onAddToQueue(song) },
-                                    onAddToPlaylist = { onAddToPlaylist(song) },
-                                    hapticFeedback = { haptic.performHapticFeedback(HapticFeedbackType.LongPress) }
-                                )
+                                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("Create Playlist")
                             }
                         }
                     }
@@ -367,7 +290,7 @@ fun LibraryScreen(
         var playlistName by remember { mutableStateOf("") }
         AlertDialog(
             onDismissRequest = { showCreateDialog = false },
-            containerColor = DarkSurfaceContainer,
+            containerColor = MaterialTheme.colorScheme.surfaceContainer,
             title = {
                 Text(
                     "New Playlist",
@@ -429,7 +352,7 @@ private fun PlaylistCard(
             .clickable(onClick = onClick),
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(
-            containerColor = DarkSurfaceContainer
+            containerColor = MaterialTheme.colorScheme.surfaceContainer
         )
     ) {
         Row(

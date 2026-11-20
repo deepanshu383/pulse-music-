@@ -1,2 +1,0 @@
-sed -i 's/var sortOrder by remember { mutableStateOf(PlaylistSortOrder.DATE_ADDED_NEWEST) }/var sortOrder by remember(initialSortOrder) { mutableStateOf(initialSortOrder) }/' app/src/main/java/com/example/ui/PlaylistDetailsScreen.kt
-sed -i 's/var viewMode by remember { mutableStateOf(PlaylistViewMode.LIST) }/var viewMode by remember(initialViewMode) { mutableStateOf(initialViewMode) }/' app/src/main/java/com/example/ui/PlaylistDetailsScreen.kt

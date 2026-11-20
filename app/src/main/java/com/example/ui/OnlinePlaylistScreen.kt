@@ -23,6 +23,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.data.local.SongEntity
 import com.example.data.remote.ApiOnlinePlaylistDetail
@@ -37,19 +38,18 @@ fun OnlinePlaylistScreen(
     onSongClick: (SongEntity, List<SongEntity>) -> Unit,
     onAddToQueue: (SongEntity) -> Unit = {},
     onAddToPlaylist: (SongEntity) -> Unit = {},
-    onAddOnlinePlaylistToPlaylist: (String, String) -> Unit = { _, _ -> }
+    onAddOnlinePlaylistToPlaylist: (String, String) -> Unit = { _, _ -> },
+    currentSongId: String? = null,
+    isPlaying: Boolean = false,
+    onTogglePlayPause: () -> Unit = {}
 ) {
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(DarkBackground)
-    ) {
+    FluidBackdrop {
         if (isLoading) {
             Box(
                 modifier = Modifier.fillMaxSize(),
                 contentAlignment = Alignment.Center
             ) {
-                CircularProgressIndicator(color = PulseAccent)
+                CircularProgressIndicator(color = RanjhaNeonPink)
             }
         } else if (playlistDetail == null) {
             Box(
@@ -60,7 +60,8 @@ fun OnlinePlaylistScreen(
             }
         } else {
             LazyColumn(
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(bottom = 120.dp)
             ) {
                 // Header
                 item(key = "header") {
@@ -73,17 +74,22 @@ fun OnlinePlaylistScreen(
 
                 // Song list
                 items(songs, key = { "song_${it.filePath}" }) { song ->
-                    OnlinePlaylistSongItem(
+                    val isCurrentTrack = currentSongId != null && song.filePath == currentSongId
+                    val isActivelyPlaying = isCurrentTrack && isPlaying
+                    OnlinePlaylistSongGlassItem(
                         song = song,
-                        onClick = { onSongClick(song, songs) },
+                        isCurrentTrack = isCurrentTrack,
+                        isActivelyPlaying = isActivelyPlaying,
+                        onClick = {
+                            if (isCurrentTrack) {
+                                onTogglePlayPause()
+                            } else {
+                                onSongClick(song, songs)
+                            }
+                        },
                         onAddToQueue = { onAddToQueue(song) },
                         onAddToPlaylist = { onAddToPlaylist(song) }
                     )
-                }
-
-                // Bottom spacer
-                item(key = "bottom_spacer") {
-                    Spacer(modifier = Modifier.height(100.dp))
                 }
             }
         }
@@ -100,7 +106,7 @@ private fun PlaylistHeader(
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .height(300.dp)
+            .height(280.dp)
     ) {
         // Background image
         val imageUrl = detail.image?.lastOrNull()?.url
@@ -121,10 +127,10 @@ private fun PlaylistHeader(
                     Brush.verticalGradient(
                         colors = listOf(
                             Color.Transparent,
-                            DarkBackground.copy(alpha = 0.6f),
-                            DarkBackground
+                            MidnightNavy.copy(alpha = 0.7f),
+                            MidnightNavy
                         ),
-                        startY = 80f
+                        startY = 60f
                     )
                 )
         )
@@ -133,28 +139,25 @@ private fun PlaylistHeader(
             modifier = Modifier
                 .fillMaxWidth()
                 .statusBarsPadding()
-                .padding(8.dp),
+                .padding(horizontal = 16.dp, vertical = 10.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            IconButton(
-                onClick = onBack
-            ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint = Color.White,
-                    modifier = Modifier.size(28.dp)
-                )
-            }
+            CircularGlassButton(
+                icon = Icons.AutoMirrored.Filled.ArrowBack,
+                onClick = onBack,
+                size = 42.dp,
+                iconSize = 20.dp
+            )
+
             Box {
-                IconButton(onClick = { menuExpanded = true }) {
-                    Icon(
-                        Icons.Default.MoreVert,
-                        contentDescription = "More",
-                        tint = Color.White
-                    )
-                }
+                CircularGlassButton(
+                    icon = Icons.Default.MoreVert,
+                    onClick = { menuExpanded = true },
+                    size = 42.dp,
+                    iconSize = 20.dp
+                )
+
                 DropdownMenu(
                     expanded = menuExpanded,
                     onDismissRequest = { menuExpanded = false }
@@ -179,8 +182,8 @@ private fun PlaylistHeader(
         ) {
             Text(
                 text = detail.name,
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Black,
+                fontSize = 24.sp,
+                fontWeight = FontWeight.Bold,
                 color = Color.White,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
@@ -197,74 +200,37 @@ private fun PlaylistHeader(
             if (subtitle.isNotEmpty()) {
                 Text(
                     text = subtitle,
-                    style = MaterialTheme.typography.bodyLarge,
+                    fontSize = 13.sp,
                     color = TextSecondary
-                )
-            }
-
-            if (!detail.description.isNullOrBlank()) {
-                Spacer(modifier = Modifier.height(4.dp))
-                Text(
-                    text = detail.description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextTertiary,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
                 )
             }
         }
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun OnlinePlaylistSongItem(
+private fun OnlinePlaylistSongGlassItem(
     song: SongEntity,
+    isCurrentTrack: Boolean = false,
+    isActivelyPlaying: Boolean = false,
     onClick: () -> Unit,
     onAddToQueue: () -> Unit,
     onAddToPlaylist: () -> Unit
 ) {
     var menuExpanded by remember { mutableStateOf(false) }
-    val dismissState = rememberSwipeToDismissBoxState(
-        confirmValueChange = { dismissValue ->
-            if (dismissValue == SwipeToDismissBoxValue.StartToEnd) {
-                onAddToQueue()
-            }
-            false
-        }
-    )
 
-    SwipeToDismissBox(
-        state = dismissState,
-        enableDismissFromStartToEnd = true,
-        enableDismissFromEndToStart = false,
-        backgroundContent = {
-            val color = if (dismissState.targetValue == SwipeToDismissBoxValue.StartToEnd) {
-                PulseAccent.copy(alpha = 0.15f)
-            } else {
-                Color.Transparent
-            }
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(color)
-                    .padding(horizontal = 20.dp),
-                contentAlignment = Alignment.CenterStart
-            ) {
-                Icon(
-                    Icons.Default.QueueMusic,
-                    contentDescription = "Add to Queue",
-                    tint = PulseAccent
-                )
-            }
-        }
+    GlassCard(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 5.dp),
+        shape = RoundedCornerShape(16.dp),
+        fillAlpha = if (isCurrentTrack) 0.30f else 0.20f,
+        onClick = onClick
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .background(DarkBackground)
-                .clickable(onClick = onClick)
-                .padding(horizontal = 20.dp, vertical = 8.dp),
+                .padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Album art
@@ -272,9 +238,8 @@ private fun OnlinePlaylistSongItem(
                 model = song.albumArtPath ?: android.R.drawable.ic_media_play,
                 contentDescription = "Album Art",
                 modifier = Modifier
-                    .size(52.dp)
-                    .clip(RoundedCornerShape(8.dp))
-                    .background(DarkSurfaceContainer),
+                    .size(46.dp)
+                    .clip(RoundedCornerShape(10.dp)),
                 contentScale = ContentScale.Crop
             )
 
@@ -283,19 +248,39 @@ private fun OnlinePlaylistSongItem(
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     text = song.title,
-                    style = MaterialTheme.typography.bodyLarge,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
-                    color = TextPrimary,
+                    color = if (isCurrentTrack) RanjhaNeonPink else Color.White,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(
-                    text = "${song.artist} • ${formatDuration(song.duration)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = TextSecondary,
+                    text = if (isActivelyPlaying) "Playing • ${song.artist}" else "${song.artist} • ${formatDuration(song.duration)}",
+                    fontSize = 12.sp,
+                    color = if (isActivelyPlaying) RanjhaCyan else TextSecondary,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+
+            if (isActivelyPlaying) {
+                AudioWaveformVisualizer(
+                    isPlaying = true,
+                    barCount = 10,
+                    activeColor = RanjhaCyan,
+                    minHeight = 3.dp,
+                    maxHeight = 16.dp
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+            } else if (isCurrentTrack) {
+                AudioWaveformVisualizer(
+                    isPlaying = false,
+                    barCount = 10,
+                    activeColor = TextSecondary,
+                    minHeight = 3.dp,
+                    maxHeight = 16.dp
+                )
+                Spacer(modifier = Modifier.width(6.dp))
             }
 
             Box {
@@ -303,8 +288,8 @@ private fun OnlinePlaylistSongItem(
                     Icon(
                         Icons.Default.MoreVert,
                         contentDescription = "More",
-                        tint = PulseAccent,
-                        modifier = Modifier.size(24.dp)
+                        tint = TextSecondary,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
 

@@ -10,16 +10,20 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.LibraryMusic
+import androidx.compose.material.icons.outlined.Notifications
+import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Settings
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,8 +37,11 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.example.data.local.PlaylistEntity
 import com.example.data.local.SongEntity
 import com.example.ui.theme.*
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 private data class NavItem(
     val route: String,
@@ -45,47 +52,68 @@ private data class NavItem(
 
 private val navItems = listOf(
     NavItem("home", Icons.Filled.Home, Icons.Outlined.Home, "Home"),
+    NavItem("library", Icons.Filled.LibraryMusic, Icons.Outlined.LibraryMusic, "Playlists"),
     NavItem("search", Icons.Filled.Search, Icons.Outlined.Search, "Search"),
-    NavItem("library", Icons.Filled.LibraryMusic, Icons.Outlined.LibraryMusic, "Library"),
-    NavItem("settings", Icons.Filled.Settings, Icons.Outlined.Settings, "Settings")
+    NavItem("settings", Icons.Filled.Person, Icons.Outlined.Person, "Profile")
 )
 
 @Composable
-fun MainScreen(viewModel: MainViewModel) {
+fun MainScreen(
+    viewModel: MainViewModel,
+    currentThemeMode: AppThemeMode = AppThemeMode.MIDNIGHT,
+    onThemeChange: (AppThemeMode) -> Unit = {}
+) {
     val songs by viewModel.songs.collectAsStateWithLifecycle()
     val allPlaylists by viewModel.allPlaylists.collectAsStateWithLifecycle()
-    val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
     val folderUri by viewModel.folderUri.collectAsStateWithLifecycle()
     val onlineSearchResults by viewModel.onlineSearchResults.collectAsStateWithLifecycle()
+
+    // Collect ONLY play/pause and active song identity at top-level (NOT currentPosition!)
+    // so playback timer ticks never cause scrolling lists or NavHost to recompose.
+    val isPlaying by remember(viewModel) {
+        viewModel.playbackState.map { it.isPlaying }.distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = false)
+
+    val activeTrackFromController by remember(viewModel) {
+        viewModel.playbackState.map { state ->
+            val item = state.queue.getOrNull(state.currentQueueIndex)
+            if (item != null) {
+                SongEntity(
+                    filePath = item.mediaId,
+                    title = item.mediaMetadata.title?.toString() ?: "Unknown",
+                    artist = item.mediaMetadata.artist?.toString() ?: "Unknown",
+                    album = item.mediaMetadata.albumTitle?.toString() ?: "Unknown",
+                    albumArtPath = item.mediaMetadata.artworkUri?.toString(),
+                    duration = item.mediaMetadata.extras?.getLong("duration") ?: 0L,
+                    isOnline = item.mediaMetadata.extras?.getBoolean("isOnline") ?: true
+                )
+            } else null
+        }.distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = null)
+
+    val activeSongFromController by remember(viewModel) {
+        viewModel.playbackState.map { it.currentSong }.distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = null)
+
+    val activeSongIdFromController by remember(viewModel) {
+        viewModel.playbackState.map { it.currentSongId }.distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = null)
 
     val navController = rememberNavController()
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route
 
     val lastPlayedSongId = remember { viewModel.playlistPrefs.getLastPlayedSongId() }
-    val allAvailableSongs = songs + onlineSearchResults
-    val currentMediaItem = playbackState.queue.getOrNull(playbackState.currentQueueIndex)
-    val nowPlayingSong = if (currentMediaItem != null) {
-        SongEntity(
-            filePath = currentMediaItem.mediaId,
-            title = currentMediaItem.mediaMetadata.title?.toString() ?: "Unknown",
-            artist = currentMediaItem.mediaMetadata.artist?.toString() ?: "Unknown",
-            album = currentMediaItem.mediaMetadata.albumTitle?.toString() ?: "Unknown",
-            albumArtPath = currentMediaItem.mediaMetadata.artworkUri?.toString(),
-            duration = currentMediaItem.mediaMetadata.extras?.getLong("duration") ?: 0L,
-            isOnline = currentMediaItem.mediaMetadata.extras?.getBoolean("isOnline") ?: true
-        )
-    } else {
-        val activeSongId = playbackState.currentSongId ?: lastPlayedSongId ?: songs.firstOrNull()?.filePath
-        allAvailableSongs.find { it.filePath == activeSongId }
+    val activeSongId = activeSongIdFromController ?: activeSongFromController?.filePath ?: lastPlayedSongId
+    val nowPlayingSong = remember(activeSongFromController, activeTrackFromController, activeSongId, songs, onlineSearchResults) {
+        activeSongFromController ?: activeTrackFromController ?: run {
+            val sId = activeSongId ?: songs.firstOrNull()?.filePath
+            songs.find { it.filePath == sId } ?: onlineSearchResults.find { it.filePath == sId }
+        }
     }
 
-    // Compute queue count for the Home screen badge
-    val queueStartIndex = if (playbackState.currentQueueIndex != -1) playbackState.currentQueueIndex + 1 else 0
-    val queueSongCount = if (queueStartIndex <= playbackState.queue.size) playbackState.queue.size - queueStartIndex else 0
-
     Scaffold(
-        containerColor = DarkBackground,
+        containerColor = MaterialTheme.colorScheme.background,
         bottomBar = {
             Column {
                 // B1: Mini Player Bar (visible when a song is playing/selected)
@@ -93,9 +121,10 @@ fun MainScreen(viewModel: MainViewModel) {
                 if (showMiniPlayer) {
                     MiniPlayerBar(
                         song = nowPlayingSong!!,
-                        playbackState = playbackState,
+                        isPlaying = isPlaying,
+                        playbackStateFlow = viewModel.playbackState,
                         onPlayPause = {
-                            if (playbackState.isPlaying) viewModel.musicController.pause()
+                            if (isPlaying) viewModel.musicController.pause()
                             else viewModel.musicController.play()
                         },
                         onNext = { viewModel.musicController.next() },
@@ -110,10 +139,11 @@ fun MainScreen(viewModel: MainViewModel) {
                 PulseBottomNavBar(
                     currentRoute = currentRoute,
                     onNavigate = { route ->
+                        val isSubScreen = currentRoute != null && currentRoute !in listOf("home", "search", "library", "settings")
                         navController.navigate(route) {
-                            popUpTo("home") { saveState = true }
+                            popUpTo("home") { saveState = !isSubScreen }
                             launchSingleTop = true
-                            restoreState = true
+                            restoreState = !isSubScreen
                         }
                     }
                 )
@@ -124,14 +154,10 @@ fun MainScreen(viewModel: MainViewModel) {
             navController = navController,
             startDestination = "home",
             modifier = Modifier.padding(innerPadding),
-            enterTransition = { fadeIn(animationSpec = tween(300)) },
-            exitTransition = { fadeOut(animationSpec = tween(300)) }
+            enterTransition = { fadeIn(animationSpec = tween(110)) },
+            exitTransition = { fadeOut(animationSpec = tween(110)) }
         ) {
             composable("home") {
-                val currentLyrics by viewModel.currentLyrics.collectAsStateWithLifecycle()
-                val recommendations by viewModel.recommendations.collectAsStateWithLifecycle()
-                val canUndo by viewModel.canUndo.collectAsStateWithLifecycle()
-                
                 // Discover section state
                 val featuredPlaylists by viewModel.featuredPlaylists.collectAsStateWithLifecycle()
                 val trendingSongs by viewModel.trendingSongs.collectAsStateWithLifecycle()
@@ -143,7 +169,7 @@ fun MainScreen(viewModel: MainViewModel) {
                     trendingSongs = trendingSongs,
                     homeLoading = homeLoading,
                     homeError = homeError,
-                    onRetryHomeLoad = { viewModel.fetchHomeData() },
+                    onRetryHomeLoad = { viewModel.fetchHomeData(forceRefresh = true) },
                     onPlaylistClick = { id -> navController.navigate("online_playlist/$id") },
                     onTrendingSongClick = { song, list ->
                         viewModel.playSong(song, list)
@@ -152,11 +178,18 @@ fun MainScreen(viewModel: MainViewModel) {
                     onAddToQueue = { song ->
                         if (song.isOnline) viewModel.addOnlineSongToQueue(song)
                         else viewModel.addToQueue(song)
+                    },
+                    currentSongId = activeSongId,
+                    isPlaying = isPlaying,
+                    onTogglePlayPause = {
+                        if (isPlaying) viewModel.musicController.pause()
+                        else viewModel.musicController.play()
                     }
                 )
             }
 
             composable("player") {
+                val playbackState by viewModel.playbackState.collectAsStateWithLifecycle()
                 val currentLyrics by viewModel.currentLyrics.collectAsStateWithLifecycle()
                 val recommendations by viewModel.recommendations.collectAsStateWithLifecycle()
                 val canUndo by viewModel.canUndo.collectAsStateWithLifecycle()
@@ -225,7 +258,6 @@ fun MainScreen(viewModel: MainViewModel) {
                     onSongClick = { song, list ->
                         viewModel.playSong(song, list)
                         viewModel.playlistPrefs.saveLastPlayedSongId(song.filePath)
-                        viewModel.saveSearchHistory(song.title, "SONG", song.filePath)
                     },
                     onPlaylistClick = { id, name -> 
                         navController.navigate("online_playlist/$id")
@@ -234,6 +266,12 @@ fun MainScreen(viewModel: MainViewModel) {
                     onArtistClick = { id, name -> 
                         navController.navigate("artist_profile/$id")
                         viewModel.saveSearchHistory(name, "ARTIST", id)
+                    },
+                    currentSongId = activeSongId,
+                    isPlaying = isPlaying,
+                    onTogglePlayPause = {
+                        if (isPlaying) viewModel.musicController.pause()
+                        else viewModel.musicController.play()
                     }
                 )
             }
@@ -262,7 +300,13 @@ fun MainScreen(viewModel: MainViewModel) {
                         if (song.isOnline) viewModel.addOnlineSongToQueue(song)
                         else viewModel.addToQueue(song)
                     },
-                    onAddToPlaylist = { song -> viewModel.openAddToPlaylist(AddToPlaylistTarget.Song(song)) }
+                    onAddToPlaylist = { song -> viewModel.openAddToPlaylist(AddToPlaylistTarget.Song(song)) },
+                    currentSongId = activeSongId,
+                    isPlaying = isPlaying,
+                    onTogglePlayPause = {
+                        if (isPlaying) viewModel.musicController.pause()
+                        else viewModel.musicController.play()
+                    }
                 )
             }
 
@@ -293,6 +337,12 @@ fun MainScreen(viewModel: MainViewModel) {
                     onAddToPlaylist = { song -> viewModel.openAddToPlaylist(AddToPlaylistTarget.Song(song)) },
                     onAddOnlinePlaylistToPlaylist = { pid, pname -> 
                         viewModel.openAddToPlaylist(AddToPlaylistTarget.OnlinePlaylist(pid, pname))
+                    },
+                    currentSongId = activeSongId,
+                    isPlaying = isPlaying,
+                    onTogglePlayPause = {
+                        if (isPlaying) viewModel.musicController.pause()
+                        else viewModel.musicController.play()
                     }
                 )
             }
@@ -336,16 +386,45 @@ fun MainScreen(viewModel: MainViewModel) {
                     isSaveQueueEnabled = isSaveQueueEnabled,
                     onSaveQueueChange = { viewModel.setSaveQueueEnabled(it) },
                     isAutoPlayNextEnabled = isAutoPlayNextEnabled,
-                    onAutoPlayNextChange = { viewModel.setAutoPlayNextEnabled(it) }
+                    onAutoPlayNextChange = { viewModel.setAutoPlayNextEnabled(it) },
+                    currentThemeMode = currentThemeMode,
+                    onThemeChange = onThemeChange
                 )
             }
 
             composable("playlist_details/{id}") { backStackEntry ->
                 val idString = backStackEntry.arguments?.getString("id")
                 val id = idString?.toLongOrNull() ?: 0L
-                val playlist = allPlaylists.find { it.id == id }
-                val playlistSongs by viewModel.playlistRepository.getSongsForPlaylist(id)
+                val isAllSongsPlaylist = id == -1L
+                val isDownloadedPlaylist = id == -2L
+
+                val playlist = when {
+                    isAllSongsPlaylist -> PlaylistEntity(
+                        id = -1L,
+                        name = "All Songs",
+                        description = "${songs.size} songs • Library",
+                        createdDate = 0L
+                    )
+                    isDownloadedPlaylist -> {
+                        val offline = songs.filter { !it.isOnline }
+                        PlaylistEntity(
+                            id = -2L,
+                            name = "Downloaded Songs",
+                            description = "${offline.size} songs • Offline Files",
+                            createdDate = 0L
+                        )
+                    }
+                    else -> allPlaylists.find { it.id == id }
+                }
+
+                val dbPlaylistSongs by viewModel.playlistRepository.getSongsForPlaylist(id)
                     .collectAsStateWithLifecycle(initialValue = emptyList())
+
+                val playlistSongs = when {
+                    isAllSongsPlaylist -> songs
+                    isDownloadedPlaylist -> songs.filter { !it.isOnline }
+                    else -> dbPlaylistSongs
+                }
 
                 if (playlist != null) {
                     val initialSortOrderStr = viewModel.playlistPrefs.getSortOrder(id)
@@ -362,23 +441,28 @@ fun MainScreen(viewModel: MainViewModel) {
                         onSortOrderChange = { order -> viewModel.playlistPrefs.saveSortOrder(id, order.name) },
                         onViewModeChange = { mode -> viewModel.playlistPrefs.saveViewMode(id, mode.name) },
                         onBack = { navController.popBackStack() },
-                        onAddMoreSongs = { navController.navigate("select_songs/$id") },
-                        onRemoveSong = { song -> viewModel.removeSongFromPlaylist(id, song.filePath) },
-                        onMoveSong = { from, to -> viewModel.reorderPlaylistSongs(id, from, to) },
+                        onAddMoreSongs = { if (id > 0) navController.navigate("select_songs/$id") },
+                        onRemoveSong = { song -> if (id > 0) viewModel.removeSongFromPlaylist(id, song.filePath) },
+                        onMoveSong = { from, to -> if (id > 0) viewModel.reorderPlaylistSongs(id, from, to) },
                         onDeletePlaylist = {
-                            viewModel.deletePlaylist(id)
-                            navController.popBackStack()
+                            if (id > 0) {
+                                viewModel.deletePlaylist(id)
+                                navController.popBackStack()
+                            }
                         },
-                        onEditPlaylistName = { name -> viewModel.updatePlaylistName(id, name) },
+                        onEditPlaylistName = { name -> if (id > 0) viewModel.updatePlaylistName(id, name) },
                         onSongClick = { song ->
                             viewModel.playSong(song, playlistSongs)
                             viewModel.playlistPrefs.saveLastPlayedSongId(song.filePath)
-                            navController.navigate("home") {
-                                popUpTo("home") { inclusive = true }
-                                launchSingleTop = true
-                            }
                         },
-                        onAddToQueue = { song -> viewModel.addToQueue(song) }
+                        onAddToQueue = { song -> viewModel.addToQueue(song) },
+                        onAddToPlaylist = { song -> viewModel.openAddToPlaylist(AddToPlaylistTarget.Song(song)) },
+                        currentSongId = activeSongId,
+                        isPlaying = isPlaying,
+                        onTogglePlayPause = {
+                            if (isPlaying) viewModel.musicController.pause()
+                            else viewModel.musicController.play()
+                        }
                     )
                 }
             }
@@ -426,35 +510,47 @@ private fun PulseBottomNavBar(
     currentRoute: String?,
     onNavigate: (String) -> Unit
 ) {
-    // Only show for main tabs, hide during sub-screens
-    val isMainTab = currentRoute in listOf("home", "search", "library", "settings")
+    // Always show bottom navigation bar except when full-screen song player is open
+    val showNavBar = currentRoute != "player"
+    val activeTabRoute = when {
+        currentRoute == null -> "home"
+        currentRoute.startsWith("playlist_details") || currentRoute.startsWith("select_songs") -> "library"
+        currentRoute.startsWith("online_playlist") || currentRoute.startsWith("artist") -> "home"
+        else -> currentRoute
+    }
 
     AnimatedVisibility(
-        visible = isMainTab,
+        visible = showNavBar,
         enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
         exit = slideOutVertically(targetOffsetY = { it }) + fadeOut()
     ) {
-        Surface(
-            modifier = Modifier.fillMaxWidth(),
-            color = DarkSurface,
-            tonalElevation = 0.dp,
-            shadowElevation = 0.dp
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 6.dp)
+                .navigationBarsPadding()
         ) {
-            Row(
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 40.dp, vertical = 12.dp)
-                    .navigationBarsPadding(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-                verticalAlignment = Alignment.CenterVertically
+                    .height(64.dp)
+                    .glassmorphic(shape = RoundedCornerShape(32.dp), fillAlpha = 0.38f)
+                    .padding(horizontal = 10.dp),
+                contentAlignment = Alignment.Center
             ) {
-                navItems.forEach { item ->
-                    val isSelected = currentRoute == item.route
-                    PulseNavItem(
-                        icon = if (isSelected) item.selectedIcon else item.unselectedIcon,
-                        isSelected = isSelected,
-                        onClick = { onNavigate(item.route) }
-                    )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    navItems.forEach { item ->
+                        val isSelected = activeTabRoute == item.route
+                        PulseNavItem(
+                            icon = if (isSelected) item.selectedIcon else item.unselectedIcon,
+                            isSelected = isSelected,
+                            onClick = { onNavigate(item.route) }
+                        )
+                    }
                 }
             }
         }
@@ -468,14 +564,14 @@ private fun PulseNavItem(
     onClick: () -> Unit
 ) {
     val iconColor by animateColorAsState(
-        targetValue = if (isSelected) PulseAccent else TextTertiary,
+        targetValue = if (isSelected) RanjhaNeonPink else TextSecondary,
         animationSpec = tween(200),
         label = "navIconColor"
     )
 
     IconButton(
         onClick = onClick,
-        modifier = Modifier.size(56.dp)
+        modifier = Modifier.size(52.dp)
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -485,16 +581,15 @@ private fun PulseNavItem(
                 imageVector = icon,
                 contentDescription = null,
                 tint = iconColor,
-                modifier = Modifier.size(26.dp)
+                modifier = Modifier.size(24.dp)
             )
             if (isSelected) {
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(3.dp))
                 Box(
                     modifier = Modifier
-                        .width(20.dp)
-                        .height(3.dp)
-                        .clip(RoundedCornerShape(1.5.dp))
-                        .background(PulseAccent)
+                        .size(4.dp)
+                        .clip(androidx.compose.foundation.shape.CircleShape)
+                        .background(RanjhaNeonPink)
                 )
             }
         }
@@ -504,18 +599,19 @@ private fun PulseNavItem(
 @Composable
 fun MiniPlayerBar(
     song: SongEntity,
-    playbackState: com.example.service.PlaybackState,
+    isPlaying: Boolean,
+    playbackStateFlow: kotlinx.coroutines.flow.StateFlow<com.example.service.PlaybackState>,
     onPlayPause: () -> Unit,
     onNext: () -> Unit,
     onPrevious: () -> Unit,
     onClick: () -> Unit
 ) {
-    Surface(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(onClick = onClick),
-        color = DarkSurfaceContainer,
-        tonalElevation = 4.dp
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .glassmorphic(shape = RoundedCornerShape(20.dp), fillAlpha = 0.32f)
+            .clickable(onClick = onClick)
     ) {
         Column {
             Row(
@@ -526,16 +622,16 @@ fun MiniPlayerBar(
             ) {
                 // Album Art
                 coil.compose.AsyncImage(
-                    model = song.albumArtPath,
+                    model = song.albumArtPath ?: android.R.drawable.ic_media_play,
                     contentDescription = "Album Art",
                     modifier = Modifier
-                        .size(44.dp)
-                        .clip(RoundedCornerShape(8.dp)),
+                        .size(42.dp)
+                        .clip(RoundedCornerShape(10.dp)),
                     contentScale = androidx.compose.ui.layout.ContentScale.Crop
                 )
-                
+
                 Spacer(modifier = Modifier.width(12.dp))
-                
+
                 // Song Info
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -554,22 +650,12 @@ fun MiniPlayerBar(
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                     )
                 }
-                
-                // Previous Button
-                IconButton(onClick = onPrevious) {
-                    Icon(
-                        imageVector = Icons.Filled.SkipPrevious,
-                        contentDescription = "Previous",
-                        tint = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
 
                 // Play/Pause Button
                 IconButton(onClick = onPlayPause) {
                     Icon(
-                        imageVector = if (playbackState.isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
-                        contentDescription = if (playbackState.isPlaying) "Pause" else "Play",
+                        imageVector = if (isPlaying) Icons.Filled.Pause else Icons.Filled.PlayArrow,
+                        contentDescription = if (isPlaying) "Pause" else "Play",
                         tint = MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier.size(28.dp)
                     )
@@ -586,19 +672,30 @@ fun MiniPlayerBar(
                 }
             }
 
-            // Thin Progress Bar at bottom of MiniPlayer
-            val progress = if (playbackState.duration > 0) {
-                playbackState.currentPosition.toFloat() / playbackState.duration.toFloat()
-            } else 0f
-            
-            LinearProgressIndicator(
-                progress = { progress },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(2.dp),
-                color = PulseAccent,
-                trackColor = Color.Transparent
-            )
+            // Isolated leaf composable so ONLY the 2dp progress bar redraws on playback ticks!
+            MiniPlayerProgressBar(playbackStateFlow = playbackStateFlow)
         }
     }
+}
+
+@Composable
+private fun MiniPlayerProgressBar(
+    playbackStateFlow: kotlinx.coroutines.flow.StateFlow<com.example.service.PlaybackState>
+) {
+    val progress by remember(playbackStateFlow) {
+        playbackStateFlow.map { state ->
+            if (state.duration > 0) {
+                (state.currentPosition.toFloat() / state.duration.toFloat()).coerceIn(0f, 1f)
+            } else 0f
+        }.distinctUntilChanged()
+    }.collectAsStateWithLifecycle(initialValue = 0f)
+
+    LinearProgressIndicator(
+        progress = { progress },
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(2.dp),
+        color = RanjhaNeonPink,
+        trackColor = Color.Transparent
+    )
 }

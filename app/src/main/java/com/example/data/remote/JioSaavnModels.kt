@@ -13,6 +13,12 @@ data class SearchResponse(
 )
 
 @JsonClass(generateAdapter = true)
+data class SongDetailResponse(
+    val success: Boolean?,
+    val data: List<ApiSong>?
+)
+
+@JsonClass(generateAdapter = true)
 data class SearchData(
     val total: Int?,
     val start: Int?,
@@ -98,12 +104,12 @@ data class PlaylistSearchData(
 data class ApiPlaylistItem(
     val id: String,
     val name: String,
-    val type: String?,
-    val image: List<ApiImage>?,
-    val url: String?,
-    val songCount: Int?,
-    val language: String?,
-    val explicitContent: Boolean?
+    val type: String? = null,
+    val image: List<ApiImage>? = null,
+    val url: String? = null,
+    val songCount: Int? = null,
+    val language: String? = null,
+    val explicitContent: Boolean? = null
 )
 
 // ═══════════════════════════════════════════════

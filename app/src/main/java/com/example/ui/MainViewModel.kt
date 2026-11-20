@@ -62,12 +62,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         initialValue = emptyList()
     )
 
+    private val userPrefsManager = com.example.data.local.UserPreferencesManager(application)
     private val jioSaavnRepository = com.example.data.repository.JioSaavnRepository()
 
     private val recommendationEngine = com.example.recommendation.DefaultRecommendationEngine(
         timeOfDayScorer = com.example.recommendation.TimeOfDayScorer(db.playbackHistoryDao()),
         fatigueScorer = com.example.recommendation.FatigueScorer(db.playbackHistoryDao()),
-        userPreferencesManager = com.example.data.local.UserPreferencesManager(application)
+        userPreferencesManager = userPrefsManager
     )
     
     private val weightAnalyticsManager = com.example.recommendation.WeightAnalyticsManager()
@@ -94,11 +95,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             if (langLock != null) {
                 lockedSessionLanguage = langLock
-            }
-
-            // Temporary instrumentation run
-            if (com.example.BuildConfig.DEBUG) {
-                runInstrumentationLoop()
             }
         }
     }
@@ -188,32 +184,156 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _homeError = MutableStateFlow<String?>(null)
     val homeError = _homeError.asStateFlow()
 
-    fun fetchHomeData() {
+    private var manualHomeRefreshSalt = 0L
+
+    fun fetchHomeData(forceRefresh: Boolean = false) {
         viewModelScope.launch {
-            _homeLoading.value = true
+            val currentHourBucket = System.currentTimeMillis() / 3_600_000L
+
+            // Instant load from 1-hour local cache if we're still within the same hour
+            if (!forceRefresh && userPrefsManager.getCachedHomeHourBucket() == currentHourBucket) {
+                val cachedSongsJson = userPrefsManager.getCachedTrendingSongsJson()
+                val cachedPlaylistsJson = userPrefsManager.getCachedFeaturedPlaylistsJson()
+                if (!cachedSongsJson.isNullOrBlank() && !cachedPlaylistsJson.isNullOrBlank()) {
+                    try {
+                        val (cachedSongs, cachedPlaylists) = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                            deserializeHomeCache(cachedSongsJson, cachedPlaylistsJson)
+                        }
+                        val hasValidUrls = cachedSongs.isEmpty() || cachedSongs.all { !it.isOnline || !it.downloadUrl.isNullOrBlank() }
+                        if ((cachedSongs.isNotEmpty() || cachedPlaylists.isNotEmpty()) && hasValidUrls) {
+                            _trendingSongs.value = cachedSongs
+                            _featuredPlaylists.value = cachedPlaylists
+                            _homeError.value = null
+                            _homeLoading.value = false
+                            return@launch
+                        }
+                    } catch (_: Exception) {
+                        // Fall through to network fetch if cache is malformed
+                    }
+                }
+            }
+
+            _homeLoading.value = _trendingSongs.value.isEmpty() && _featuredPlaylists.value.isEmpty()
             _homeError.value = null
             try {
-                val playlistsDeferred = async { jioSaavnRepository.getFeaturedPlaylists() }
-                val trendingDeferred = async { jioSaavnRepository.getTrendingSongs() }
+                val seed = if (forceRefresh) {
+                    manualHomeRefreshSalt += 1L
+                    currentHourBucket + manualHomeRefreshSalt
+                } else {
+                    currentHourBucket
+                }
+
+                val playlistsDeferred = async { jioSaavnRepository.getFeaturedPlaylists(seed) }
+                val trendingDeferred = async { jioSaavnRepository.getTrendingSongs(seed) }
 
                 val playlistsResult = playlistsDeferred.await()
                 val trendingResult = trendingDeferred.await()
 
+                val loadedPlaylists = if (playlistsResult.isSuccess) {
+                    playlistsResult.getOrNull() ?: emptyList()
+                } else _featuredPlaylists.value
+
+                val loadedSongs = if (trendingResult.isSuccess) {
+                    (trendingResult.getOrNull() ?: emptyList()).map { mapApiSongToEntity(it) }
+                } else _trendingSongs.value
+
                 if (playlistsResult.isSuccess) {
-                    _featuredPlaylists.value = playlistsResult.getOrNull() ?: emptyList()
+                    _featuredPlaylists.value = loadedPlaylists
                 }
                 if (trendingResult.isSuccess) {
-                    _trendingSongs.value = (trendingResult.getOrNull() ?: emptyList()).map { mapApiSongToEntity(it) }
+                    _trendingSongs.value = loadedSongs
                 }
-                if (playlistsResult.isFailure && trendingResult.isFailure) {
+                if (loadedSongs.isNotEmpty() || loadedPlaylists.isNotEmpty()) {
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        val (songsJson, playlistsJson) = serializeHomeCache(loadedSongs, loadedPlaylists)
+                        userPrefsManager.saveCachedHomeContent(currentHourBucket, songsJson, playlistsJson)
+                    }
+                }
+                if (playlistsResult.isFailure && trendingResult.isFailure && loadedSongs.isEmpty()) {
                     _homeError.value = "Failed to load content. Check your connection."
                 }
             } catch (e: Exception) {
-                _homeError.value = "Failed to load content. Check your connection."
+                if (_trendingSongs.value.isEmpty()) {
+                    _homeError.value = "Failed to load content. Check your connection."
+                }
             } finally {
                 _homeLoading.value = false
             }
         }
+    }
+
+    private fun serializeHomeCache(
+        songs: List<SongEntity>,
+        playlists: List<ApiPlaylistItem>
+    ): Pair<String, String> {
+        val songsArr = org.json.JSONArray()
+        songs.forEach { s ->
+            songsArr.put(org.json.JSONObject().apply {
+                put("filePath", s.filePath)
+                put("title", s.title)
+                put("artist", s.artist)
+                put("album", s.album)
+                put("duration", s.duration)
+                put("albumArtPath", s.albumArtPath ?: "")
+                put("isOnline", s.isOnline)
+                put("downloadUrl", s.downloadUrl ?: "")
+                put("isDownloaded", s.isDownloaded)
+                put("localDownloadPath", s.localDownloadPath ?: "")
+            })
+        }
+        val playlistsArr = org.json.JSONArray()
+        playlists.forEach { p ->
+            playlistsArr.put(org.json.JSONObject().apply {
+                put("id", p.id)
+                put("name", p.name)
+                put("imageUrl", p.image?.lastOrNull()?.url ?: "")
+                put("songCount", p.songCount ?: 0)
+                put("language", p.language ?: "")
+            })
+        }
+        return songsArr.toString() to playlistsArr.toString()
+    }
+
+    private fun deserializeHomeCache(
+        songsJson: String,
+        playlistsJson: String
+    ): Pair<List<SongEntity>, List<ApiPlaylistItem>> {
+        val songsList = mutableListOf<SongEntity>()
+        val sArr = org.json.JSONArray(songsJson)
+        for (i in 0 until sArr.length()) {
+            val o = sArr.getJSONObject(i)
+            songsList.add(
+                SongEntity(
+                    filePath = o.getString("filePath"),
+                    title = o.getString("title"),
+                    artist = o.optString("artist", "Unknown"),
+                    album = o.optString("album", "Unknown"),
+                    duration = o.optLong("duration", 0L),
+                    albumArtPath = o.optString("albumArtPath", "").takeIf { it.isNotBlank() },
+                    isOnline = o.optBoolean("isOnline", true),
+                    downloadUrl = o.optString("downloadUrl", "").takeIf { it.isNotBlank() },
+                    isDownloaded = o.optBoolean("isDownloaded", false),
+                    localDownloadPath = o.optString("localDownloadPath", "").takeIf { it.isNotBlank() }
+                )
+            )
+        }
+
+        val playlistsList = mutableListOf<ApiPlaylistItem>()
+        val pArr = org.json.JSONArray(playlistsJson)
+        for (i in 0 until pArr.length()) {
+            val o = pArr.getJSONObject(i)
+            val imgUrl = o.optString("imageUrl", "")
+            playlistsList.add(
+                ApiPlaylistItem(
+                    id = o.getString("id"),
+                    name = o.getString("name"),
+                    image = if (imgUrl.isNotBlank()) listOf(com.example.data.remote.ApiImage("500x500", imgUrl)) else emptyList(),
+                    songCount = o.optInt("songCount", 0),
+                    language = o.optString("language", "")
+                )
+            )
+        }
+        return songsList to playlistsList
     }
 
     // ═══════════════════════════════════════════════
@@ -296,6 +416,35 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             )
             // Limit to top 15 entries
+            dao.deleteOldEntries(15)
+        }
+    }
+
+    fun saveRecentPlayedSearchSong(song: SongEntity) {
+        viewModelScope.launch {
+            val dao = db.searchHistoryDao()
+            dao.deleteByReference(song.filePath, "SONG_ITEM")
+            val payload = org.json.JSONObject().apply {
+                put("title", song.title)
+                put("artist", song.artist)
+                put("album", song.album)
+                put("albumArtPath", song.albumArtPath ?: "")
+                put("duration", song.duration)
+                put("isOnline", song.isOnline)
+                put("downloadUrl", song.downloadUrl ?: "")
+                put("isDownloaded", song.isDownloaded)
+                put("localDownloadPath", song.localDownloadPath ?: "")
+            }.toString()
+            dao.insertSearchHistory(
+                com.example.data.local.SearchHistoryEntity(
+                    name = payload,
+                    type = "SONG_ITEM",
+                    referenceId = song.filePath,
+                    timestamp = System.currentTimeMillis()
+                )
+            )
+            // Persist full metadata in Room so local lookups and playlist JOINs retain it
+            db.songDao().insertSong(song)
             dao.deleteOldEntries(15)
         }
     }
@@ -402,6 +551,27 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                     if (songsList.isNotEmpty()) {
                         musicController.setInitialQueue(lastPlayed, savedQueue, songsList, lastPosition)
                     }
+                }
+            }
+        }
+
+        musicController.onPlaybackError = { failedSongId, error ->
+            android.util.Log.w("MainViewModel", "Playback error for $failedSongId: ${error.message}. Attempting auto-recovery...")
+            viewModelScope.launch {
+                try {
+                    val detailRes = jioSaavnRepository.getSongDetails(failedSongId)
+                    val apiSong = detailRes.getOrNull()?.firstOrNull()
+                    val freshUrl = apiSong?.downloadUrl?.lastOrNull()?.url
+                    if (!freshUrl.isNullOrBlank()) {
+                        val currentSong = musicController.playbackState.value.currentSong
+                        if (currentSong != null && currentSong.filePath == failedSongId) {
+                            val recovered = currentSong.copy(downloadUrl = freshUrl)
+                            db.songDao().insertSong(recovered)
+                            musicController.playSong(recovered)
+                        }
+                    }
+                } catch (e: Exception) {
+                    android.util.Log.e("MainViewModel", "Auto-recovery failed for $failedSongId", e)
                 }
             }
         }
@@ -929,16 +1099,92 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun playSong(song: SongEntity, allSongs: List<SongEntity> = emptyList()) {
-        val autoAdd = playlistPrefs.isAutoAddEnabled()
-        musicController.playSong(song, allSongs, autoAdd)
-        
-        // Anti-drift: Anchor session to manual pick
-        val mood = com.example.recommendation.MoodExtractionStrategy.getPrimaryMood(song.title, song.album, song.artist)
-        com.example.recommendation.RecommendationSessionManager.registerManualPick(mood)
-        
-        // Fetch Phase 4 data
-        fetchLyrics(song)
-        fetchRecommendations(song)
+        viewModelScope.launch {
+            var playableSong = song
+
+            // Check if we need to resolve a playable streaming URL or local path
+            val isLocalPlayable = (playableSong.isDownloaded && !playableSong.localDownloadPath.isNullOrBlank() && java.io.File(playableSong.localDownloadPath!!).exists()) ||
+                (playableSong.filePath.startsWith("/") && java.io.File(playableSong.filePath).exists()) ||
+                playableSong.filePath.startsWith("content://")
+
+            val needsUrl = !isLocalPlayable &&
+                (playableSong.downloadUrl.isNullOrBlank() || !playableSong.downloadUrl!!.startsWith("http"))
+
+            if (needsUrl) {
+                // 1. Check local Room DB cache first
+                val cached = db.songDao().getSongByPath(playableSong.filePath)
+                if (cached != null && !cached.downloadUrl.isNullOrBlank() && cached.downloadUrl!!.startsWith("http")) {
+                    playableSong = playableSong.copy(
+                        downloadUrl = cached.downloadUrl,
+                        isDownloaded = cached.isDownloaded,
+                        localDownloadPath = cached.localDownloadPath
+                    )
+                } else if (cached != null && cached.isDownloaded && !cached.localDownloadPath.isNullOrBlank()) {
+                    playableSong = playableSong.copy(
+                        isDownloaded = true,
+                        localDownloadPath = cached.localDownloadPath
+                    )
+                } else {
+                    // 2. Query JioSaavn API by song ID directly, fallback to search by title + artist
+                    try {
+                        val detailRes = jioSaavnRepository.getSongDetails(playableSong.filePath)
+                        val apiSong = detailRes.getOrNull()?.firstOrNull()
+                        if (apiSong != null && !apiSong.downloadUrl.isNullOrEmpty()) {
+                            val resolved = mapApiSongToEntity(apiSong)
+                            if (!resolved.downloadUrl.isNullOrBlank()) {
+                                playableSong = playableSong.copy(
+                                    downloadUrl = resolved.downloadUrl,
+                                    isOnline = true,
+                                    albumArtPath = resolved.albumArtPath ?: playableSong.albumArtPath
+                                )
+                            }
+                        } else {
+                            val searchRes = jioSaavnRepository.searchSongs("${playableSong.title} ${playableSong.artist}")
+                            val apiSongs = if (searchRes.isSuccess) searchRes.getOrNull() ?: emptyList() else {
+                                jioSaavnRepository.searchSongs(playableSong.title).getOrNull() ?: emptyList()
+                            }
+                            val match = apiSongs.find { it.id == playableSong.filePath }
+                                ?: apiSongs.find { it.name.equals(playableSong.title, ignoreCase = true) }
+                                ?: apiSongs.firstOrNull()
+                            if (match != null) {
+                                val resolved = mapApiSongToEntity(match)
+                                if (!resolved.downloadUrl.isNullOrBlank()) {
+                                    playableSong = playableSong.copy(
+                                        downloadUrl = resolved.downloadUrl,
+                                        isOnline = true,
+                                        albumArtPath = resolved.albumArtPath ?: playableSong.albumArtPath
+                                    )
+                                }
+                            }
+                        }
+                    } catch (e: Exception) {
+                        e.printStackTrace()
+                    }
+                }
+            }
+
+            // Persist the playable song into Room database
+            db.songDao().insertSong(playableSong)
+
+            val resolvedQueue = if (allSongs.isNotEmpty()) {
+                allSongs.map { s -> if (s.filePath == playableSong.filePath) playableSong else s }
+            } else {
+                listOf(playableSong)
+            }
+
+            musicController.playSong(playableSong, resolvedQueue, autoAddAll = true)
+            playlistPrefs.saveLastPlayedSongId(playableSong.filePath)
+
+            // Anti-drift: Anchor session to manual pick
+            val mood = com.example.recommendation.MoodExtractionStrategy.getPrimaryMood(
+                playableSong.title, playableSong.album, playableSong.artist
+            )
+            com.example.recommendation.RecommendationSessionManager.registerManualPick(mood)
+
+            // Fetch Phase 4 data
+            fetchLyrics(playableSong)
+            fetchRecommendations(playableSong)
+        }
     }
 
 
@@ -1306,52 +1552,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 false,
                 emptyMap(),
                 0.5f
-            ).sortedByDescending { it.totalScore }
-            
-            val top5 = scores.take(5)
-            sb.append("Top 5 Candidates:\n")
-            for ((idx, score) in top5.withIndex()) {
-                val song = validCandidates.find { it.filePath == score.trackId }
-                val title = song?.title ?: "Unknown"
-                val artist = song?.artist ?: "Unknown"
-                val canonical = com.example.recommendation.RecommendationSessionManager.getCanonicalSongKey(title, artist)
-                
-                val hardFilters = mutableListOf<String>()
-                if (score.languageConsistency <= -9999.0f) hardFilters.add("LANG")
-                if (score.eraProximity <= -9999.0f) hardFilters.add("ERA")
-                if (score.moodConsistency <= -9999.0f) hardFilters.add("MOOD")
-                val filterStr = if (hardFilters.isNotEmpty()) " [BLOCKED: ${hardFilters.joinToString()}]" else ""
-                
-                sb.append("  ${idx+1}. '$title' by $artist (Canonical: $canonical)\n")
-                sb.append("     TotalScore: ${score.totalScore}$filterStr | Mood: ${score.moodConsistency} | Era: ${score.eraProximity} | Lang: ${score.languageConsistency}\n")
-            }
-            
-            val winnerScore = top5.firstOrNull()
-            if (winnerScore == null || winnerScore.totalScore <= -9999.0f) {
-                sb.append(">> HALT: Pool exhausted or all blocked.\n")
-                break
-            }
-            
-            val winnerSong = validCandidates.find { it.filePath == winnerScore.trackId }!!
-            sb.append(">> WINNER PICKED: '${winnerSong.title}'\n")
-            
-            // Advance simulation
-            com.example.recommendation.RecommendationSessionManager.registerPlayedTrack(winnerSong.filePath, winnerSong.title, winnerSong.artist)
-            com.example.recommendation.RecommendationSessionManager.registerAutoPick(
-                com.example.recommendation.MoodExtractionStrategy.getPrimaryMood(winnerSong.title, winnerSong.album, winnerSong.artist)
-            )
-            currentSong = winnerSong
-        }
-        
-        sb.append("\n=== END SIMULATION ===\n")
-        android.util.Log.i("DevInstrumentation", sb.toString())
-    }
-
-    override fun onCleared() {
-        super.onCleared()
-        musicController.release()
-    }
-}
             ).sortedByDescending { it.totalScore }
             
             val top5 = scores.take(5)

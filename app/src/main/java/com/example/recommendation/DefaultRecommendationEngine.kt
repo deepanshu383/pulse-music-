@@ -153,7 +153,7 @@ class DefaultRecommendationEngine(
         val isLegacyLoop = current.releaseYear < 2010
         if (isLegacyLoop && isRemix(candidate.title) && !isRemix(current.title)) {
             // Heavily penalize remixes in legacy loops (filter out)
-            return RecommendationScore.Filtered(hardFiltered = true, reason = "legacy_remix_mismatch")
+            return RecommendationScore.Filtered(hardFiltered = true, score = -9999.0f, reason = "legacy_remix_mismatch")
         }
 
         val yearDiff = Math.abs(current.releaseYear - candidate.releaseYear)
@@ -167,12 +167,12 @@ class DefaultRecommendationEngine(
                 val penaltyRange = yearDiff - 5 // 1..10
                 RecommendationScore.Filtered(hardFiltered = false, score = 1.0f - (penaltyRange / 10.0f)) // linear decay from 1.0 to 0.0
             }
-            else -> RecommendationScore.Filtered(hardFiltered = true, reason = "era_mismatch") // HARD CONSTRAINT: No era jumping beyond allowed window
+            else -> RecommendationScore.Filtered(hardFiltered = true, score = -9999.0f, reason = "era_mismatch") // HARD CONSTRAINT: No era jumping beyond allowed window
         }
     }
 
     private fun calculateLanguageConsistency(effectiveLanguage: String?, candidateLang: String?): RecommendationScore.Filtered {
-        if (effectiveLanguage == null || candidateLang == null) return RecommendationScore.Filtered(hardFiltered = true, reason = "unknown_language") // HARD CONSTRAINT: Unknown language blocked
+        if (effectiveLanguage == null || candidateLang == null) return RecommendationScore.Filtered(hardFiltered = true, score = -9999.0f, reason = "unknown_language") // HARD CONSTRAINT: Unknown language blocked
 
         val currentLower = effectiveLanguage.lowercase()
         val candidateLower = candidateLang.lowercase()
@@ -185,7 +185,7 @@ class DefaultRecommendationEngine(
             return RecommendationScore.Filtered(hardFiltered = false, score = 0.2f) // Positive, but much lower than exact match (1.0) to heavily prefer exact matches
         }
 
-        return RecommendationScore.Filtered(hardFiltered = true, reason = "language_mismatch")
+        return RecommendationScore.Filtered(hardFiltered = true, score = -9999.0f, reason = "language_mismatch")
     }
 
     /**

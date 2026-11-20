@@ -47,6 +47,8 @@ class MusicController(private val context: Context) {
         }
     }
 
+    var onPlaybackError: ((String, androidx.media3.common.PlaybackException) -> Unit)? = null
+
     private fun setupController() {
         controller?.addListener(object : Player.Listener {
             override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -72,19 +74,62 @@ class MusicController(private val context: Context) {
             override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
                 updateState()
             }
+
+            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                updateState()
+                val currentId = controller?.currentMediaItem?.mediaId
+                if (currentId != null) {
+                    onPlaybackError?.invoke(currentId, error)
+                }
+            }
         })
     }
 
     fun playSong(song: SongEntity, allSongs: List<SongEntity> = emptyList(), autoAddAll: Boolean = false) {
         controller?.let { player ->
+            // If the song is ALREADY loaded in ExoPlayer, toggle play/pause immediately without rebuffering
+            if (player.currentMediaItem?.mediaId == song.filePath) {
+                if (player.isPlaying) {
+                    player.pause()
+                    _playbackState.update { it.copy(isPlaying = false) }
+                } else {
+                    if (player.playbackState == Player.STATE_IDLE) {
+                        player.prepare()
+                    }
+                    player.play()
+                    _playbackState.update { it.copy(isPlaying = true) }
+                }
+                return
+            }
+
+            // Immediately set active song and playing state so UI responds in 0ms (waveform + highlight)
+            _playbackState.update {
+                it.copy(
+                    currentSong = song,
+                    currentSongId = song.filePath,
+                    isPlaying = true
+                )
+            }
+
             val currentQueue = mutableListOf<MediaItem>()
             val currentIndex = player.currentMediaItemIndex
             
-            if (autoAddAll && allSongs.isNotEmpty()) {
+            if (allSongs.isNotEmpty()) {
                 val songIdx = allSongs.indexOfFirst { it.filePath == song.filePath }
                 if (songIdx != -1) {
+                    // Queue subsequent songs in the playlist
                     for (i in songIdx + 1 until allSongs.size) {
-                        currentQueue.add(allSongs[i].toMediaItem())
+                        val s = allSongs[i]
+                        if (s.isDownloaded || !s.downloadUrl.isNullOrBlank() || s.filePath.startsWith("http")) {
+                            currentQueue.add(s.toMediaItem())
+                        }
+                    }
+                    // Loop around and add prior songs so the entire playlist remains in queue
+                    for (i in 0 until songIdx) {
+                        val s = allSongs[i]
+                        if (s.isDownloaded || !s.downloadUrl.isNullOrBlank() || s.filePath.startsWith("http")) {
+                            currentQueue.add(s.toMediaItem())
+                        }
                     }
                 }
             } else {
@@ -180,8 +225,21 @@ class MusicController(private val context: Context) {
         controller?.seekToDefaultPosition(index)
     }
     
-    fun play() = controller?.play()
-    fun pause() = controller?.pause()
+    fun play() {
+        controller?.let { player ->
+            if (player.playbackState == Player.STATE_IDLE) {
+                player.prepare()
+            }
+            player.play()
+            _playbackState.update { it.copy(isPlaying = true) }
+        }
+    }
+    fun pause() {
+        controller?.let { player ->
+            player.pause()
+            _playbackState.update { it.copy(isPlaying = false) }
+        }
+    }
     fun next() = controller?.seekToNextMediaItem()
     fun previous() = controller?.seekToPreviousMediaItem()
     fun seekTo(positionMs: Long) = controller?.seekTo(positionMs)
@@ -195,9 +253,30 @@ class MusicController(private val context: Context) {
                 queueList.add(c.getMediaItemAt(i))
             }
             
-            _playbackState.update { 
-                it.copy(
-                    currentSongId = c.currentMediaItem?.mediaId,
+            val currentMediaId = c.currentMediaItem?.mediaId
+            _playbackState.update { old ->
+                val resolvedSong = if (old.currentSong?.filePath == currentMediaId) {
+                    old.currentSong
+                } else {
+                    c.currentMediaItem?.let { mi ->
+                        SongEntity(
+                            filePath = mi.mediaId,
+                            title = mi.mediaMetadata.title?.toString() ?: (old.currentSong?.title ?: "Unknown"),
+                            artist = mi.mediaMetadata.artist?.toString() ?: (old.currentSong?.artist ?: "Unknown Artist"),
+                            album = mi.mediaMetadata.albumTitle?.toString() ?: (old.currentSong?.album ?: "Unknown Album"),
+                            duration = c.duration.coerceAtLeast(0L),
+                            albumArtPath = mi.mediaMetadata.artworkUri?.toString() ?: old.currentSong?.albumArtPath,
+                            isOnline = old.currentSong?.isOnline ?: true,
+                            downloadUrl = old.currentSong?.downloadUrl,
+                            isDownloaded = old.currentSong?.isDownloaded ?: false,
+                            localDownloadPath = old.currentSong?.localDownloadPath
+                        )
+                    } ?: old.currentSong
+                }
+
+                old.copy(
+                    currentSong = resolvedSong,
+                    currentSongId = currentMediaId ?: old.currentSongId,
                     isPlaying = c.isPlaying,
                     duration = c.duration.coerceAtLeast(0L),
                     currentPosition = c.currentPosition.coerceAtLeast(0L),
@@ -250,22 +329,55 @@ fun SongEntity.toMediaItem(): MediaItem {
         .setArtworkUri(albumArtPath?.let { Uri.parse(it) })
         .build()
 
-    val uri = if (isDownloaded && !localDownloadPath.isNullOrEmpty()) {
-        localDownloadPath
-    } else if (isOnline && !downloadUrl.isNullOrEmpty()) {
-        downloadUrl
-    } else {
-        filePath
+    // Exhaustive, rock-solid URI resolution for all song sources:
+    // Local storage paths, Scoped Storage SAF, Downloaded songs, and Online streams.
+    val resolvedUri: Uri? = when {
+        // 1. Downloaded file on disk
+        isDownloaded && !localDownloadPath.isNullOrBlank() -> {
+            val file = java.io.File(localDownloadPath)
+            if (file.exists()) Uri.fromFile(file) else Uri.parse(localDownloadPath)
+        }
+        // 2. Local file on device storage (/storage/..., /sdcard/..., /data/...)
+        filePath.startsWith("/") -> {
+            val file = java.io.File(filePath)
+            if (file.exists()) Uri.fromFile(file) else Uri.parse("file://$filePath")
+        }
+        // 3. Explicit file scheme (file:///...)
+        filePath.startsWith("file://") -> {
+            Uri.parse(filePath)
+        }
+        // 4. Android MediaStore or Scoped Storage content URI (content://...)
+        filePath.startsWith("content://") -> {
+            Uri.parse(filePath)
+        }
+        // 5. Valid online download URL
+        !downloadUrl.isNullOrBlank() && (downloadUrl.startsWith("http://") || downloadUrl.startsWith("https://")) -> {
+            Uri.parse(downloadUrl)
+        }
+        // 6. Direct HTTP/HTTPS audio URL
+        filePath.startsWith("http://") || filePath.startsWith("https://") -> {
+            Uri.parse(filePath)
+        }
+        // 7. General fallback if downloadUrl is present
+        !downloadUrl.isNullOrBlank() -> {
+            Uri.parse(downloadUrl)
+        }
+        else -> null
     }
 
-    return MediaItem.Builder()
+    val builder = MediaItem.Builder()
         .setMediaId(filePath) // Use filePath/ID as unique identifier
-        .setUri(uri) // Use download URL or local file path
         .setMediaMetadata(metadata)
-        .build()
+
+    if (resolvedUri != null) {
+        builder.setUri(resolvedUri)
+    }
+
+    return builder.build()
 }
 
 data class PlaybackState(
+    val currentSong: SongEntity? = null,
     val currentSongId: String? = null,
     val isPlaying: Boolean = false,
     val duration: Long = 0L,

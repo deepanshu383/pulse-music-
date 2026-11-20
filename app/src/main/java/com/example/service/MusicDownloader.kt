@@ -32,7 +32,7 @@ class MusicDownloader(private val context: Context) {
                         if (statusIndex != -1 && cursor.getInt(statusIndex) == DownloadManager.STATUS_SUCCESSFUL) {
                             val localUri = if (localUriIndex != -1) cursor.getString(localUriIndex) else null
                             val path = localUri?.let { Uri.parse(it).path } 
-                                ?: "${Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)}/PulseMusic/"
+                                ?: "${Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)}/Ranjha/"
                             callback(path)
                         }
                     }
@@ -58,14 +58,14 @@ class MusicDownloader(private val context: Context) {
             .setTitle(song.title)
             .setDescription("Downloading ${song.title} by ${song.artist}")
             .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-            .setDestinationInExternalPublicDir(Environment.DIRECTORY_MUSIC, "PulseMusic/$fileName")
+            .setDestinationInExternalPublicDir(Environment.DIRECTORY_MUSIC, "Ranjha/$fileName")
             .setAllowedOverMetered(true)
             .setAllowedOverRoaming(true)
 
         val downloadId = downloadManager.enqueue(request)
         
         // Store the callback — it will be invoked only when the download actually completes
-        val path = "${Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)}/PulseMusic/$fileName"
+        val path = "${Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC)}/Ranjha/$fileName"
         pendingDownloads[downloadId] = { _ -> onDownloadComplete(path) }
         
         return downloadId

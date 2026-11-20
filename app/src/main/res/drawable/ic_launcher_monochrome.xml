@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Flute (Bansuri) Vertical Stem with evenOdd holes -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M34,25 C30.5,25 29,27 29,30 L29,78 C29,81 30.5,83 34,83 C37.5,83 39,81 39,78 L39,30 C39,27 37.5,25 34,25 Z M34,32 C35.4,32 36.5,32.8 36.5,34 C36.5,35.2 35.4,36 34,36 C32.6,36 31.5,35.2 31.5,34 C31.5,32.8 32.6,32 34,32 Z M34,48 A2.2,2.2 0 1,0 34,52.4 A2.2,2.2 0 1,0 34,48 Z M34,56 A2.2,2.2 0 1,0 34,60.4 A2.2,2.2 0 1,0 34,56 Z M34,64 A2.2,2.2 0 1,0 34,68.4 A2.2,2.2 0 1,0 34,64 Z M34,72 A2.2,2.2 0 1,0 34,76.4 A2.2,2.2 0 1,0 34,72 Z" />
+
+    <!-- Upper Loop of 'R' with inner counter -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:fillType="evenOdd"
+        android:pathData="M37,25 L58,25 C69,25 77,32 77,41 C77,50 69,57 58,57 L37,57 Z M43,32 L57,32 C63.5,32 68.5,35.5 68.5,41 C68.5,46.5 63.5,50 57,50 L43,50 Z" />
+
+    <!-- Dynamic Diagonal Leg of 'R' -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M53,53 L67.5,75 C69.5,78 72,79.5 76,79.5 C77.5,79.5 79,79 80,78 C80,76.5 78.5,74.5 77,73 L64,53 Z" />
+
+    <!-- Soundwave Equalizer Bars -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M46.25,36 L55.75,36 C56.44,36 57,36.56 57,37.25 C57,37.94 56.44,38.5 55.75,38.5 L46.25,38.5 C45.56,38.5 45,37.94 45,37.25 C45,36.56 45.56,36 46.25,36 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M46.25,40 L62.75,40 C63.44,40 64,40.56 64,41.25 C64,41.94 63.44,42.5 62.75,42.5 L46.25,42.5 C45.56,42.5 45,41.94 45,41.25 C45,40.56 45.56,40 46.25,40 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M46.25,44 L53.75,44 C54.44,44 55,44.56 55,45.25 C55,45.94 54.44,46.5 53.75,46.5 L46.25,46.5 C45.56,46.5 45,45.94 45,45.25 C45,44.56 45.56,44 46.25,44 Z" />
+
+    <!-- Acoustic sound pulse wave 1 -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round"
+        android:pathData="M24,30 C22,32.5 22,35.5 24,38" />
+
+    <!-- Acoustic sound pulse wave 2 -->
+    <path
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round"
+        android:pathData="M20,26 C17,31 17,37 20,42" />
+
+</vector>

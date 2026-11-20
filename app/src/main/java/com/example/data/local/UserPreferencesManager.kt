@@ -30,7 +30,39 @@ class UserPreferencesManager(context: Context) {
         prefs.edit().putStringSet(KEY_PREFERRED_LANGUAGES, languages).apply()
     }
 
+    fun getThemeMode(): String {
+        return prefs.getString(KEY_THEME_MODE, "system") ?: "system"
+    }
+
+    fun setThemeMode(mode: String) {
+        prefs.edit().putString(KEY_THEME_MODE, mode).apply()
+    }
+
+    fun getCachedHomeHourBucket(): Long {
+        return prefs.getLong(KEY_HOME_HOUR_BUCKET, -1L)
+    }
+
+    fun getCachedTrendingSongsJson(): String? {
+        return prefs.getString(KEY_HOME_TRENDING_SONGS, null)
+    }
+
+    fun getCachedFeaturedPlaylistsJson(): String? {
+        return prefs.getString(KEY_HOME_FEATURED_PLAYLISTS, null)
+    }
+
+    fun saveCachedHomeContent(hourBucket: Long, trendingJson: String, playlistsJson: String) {
+        prefs.edit()
+            .putLong(KEY_HOME_HOUR_BUCKET, hourBucket)
+            .putString(KEY_HOME_TRENDING_SONGS, trendingJson)
+            .putString(KEY_HOME_FEATURED_PLAYLISTS, playlistsJson)
+            .apply()
+    }
+
     companion object {
+        private const val KEY_THEME_MODE = "theme_mode"
+        private const val KEY_HOME_HOUR_BUCKET = "home_hour_bucket"
+        private const val KEY_HOME_TRENDING_SONGS = "home_trending_songs_json"
+        private const val KEY_HOME_FEATURED_PLAYLISTS = "home_featured_playlists_json"
         private const val KEY_COLD_START_COMPLETED = "cold_start_completed"
         private const val KEY_PREFERRED_ARTISTS = "preferred_artists"
         private const val KEY_PREFERRED_LANGUAGES = "preferred_languages"

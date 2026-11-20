@@ -18,7 +18,7 @@ fun ColdStartDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("Welcome to Pulse Music") },
+        title = { Text("Welcome to Ranjha") },
         text = {
             Column(modifier = Modifier.fillMaxWidth()) {
                 Text("Tell us your preferences to jumpstart recommendations:")
