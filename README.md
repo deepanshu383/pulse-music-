@@ -1,184 +1,128 @@
-# 🎵 Pulse Music — Architecture & Project Presentation
+# 🎵 Ranjha Music (Pulse Music)
 
 <div align="center">
 
-![Pulse Music Banner](https://raw.githubusercontent.com/deepanshu383/pulse-music-/main/art/banner.png)
+<h1>🎶 Ranjha Music</h1>
+<p><strong>Next-Generation Intelligent Streaming & Local Music Player for Android</strong></p>
 
-### 📊 Project Architecture, API Deployment & System Flow Deck
-*A Presentation-Style Technical Overview of Pulse Music Native Android App*
-
-[![Platform](https://img.shields.io/badge/Platform-Android%20Studio-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://developer.android.com/studio)
-[![UI](https://img.shields.io/badge/UI-Jetpack%20Compose%20%26%20M3-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
+[![Platform](https://img.shields.io/badge/Platform-Android%2014+-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://developer.android.com)
+[![Language](https://img.shields.io/badge/Kotlin-1.9.22-7F52FF?style=for-the-badge&logo=kotlin&logoColor=white)](https://kotlinlang.org)
+[![UI](https://img.shields.io/badge/Jetpack%20Compose-Material%203-4285F4?style=for-the-badge&logo=jetpackcompose&logoColor=white)](https://developer.android.com/jetpack/compose)
 [![Audio](https://img.shields.io/badge/Audio%20Engine-AndroidX%20Media3%20ExoPlayer-E53935?style=for-the-badge)](https://developer.android.com/media/media3)
-[![Cloud](https://img.shields.io/badge/Cloud%20Hosting-Render%20%26%20Google%20Firebase-FFCA28?style=for-the-badge&logo=firebase&logoColor=black)](https://firebase.google.com)
+[![Build Status](https://img.shields.io/badge/Tests-31%20Passed%20(100%25)-brightgreen?style=for-the-badge)](https://github.com/deepanshu383/pulse-music-)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue?style=for-the-badge)](LICENSE)
 
----
+<br/>
+
+**Ranjha Music** is a native Android music streaming and local audio player combining high-bitrate cloud streaming (JioSaavn API), full local storage integration (MediaStore/SAF), an intelligent 7-factor anti-drift recommendation engine, and a fluid glassmorphic Jetpack Compose interface with Material You dynamic theming.
 
 </div>
 
-## 📑 Presentation Index
-- [Slide 1: App Overview & Purpose (App Ka Kaam)](#-slide-1-app-overview--purpose-app-ka-kaam)
-- [Slide 2: System Architecture (High-Level Design)](#-slide-2-system-architecture-high-level-design)
-- [Slide 3: API Ecosystem & Deployment (APIs Kaha Aur Kaise Deploy Hai)](#-slide-3-api-ecosystem--deployment-apis-kaha-aur-kaise-deploy-hai)
-- [Slide 4: API Functions & Responsibilities (APIs Ka Kaam)](#-slide-4-api-functions--responsibilities-apis-ka-kaam)
-- [Slide 5: Complete User & Data Flow (App Ka Working Flow)](#-slide-5-complete-user--data-flow-app-ka-working-flow)
-- [Slide 6: Smart Recommendation & Anti-Drift Engine](#-slide-6-smart-recommendation--anti-drift-engine)
-- [Slide 7: Core App Screens & UI Experience](#-slide-7-core-app-screens--ui-experience)
-- [Slide 8: Database & Local Storage Design](#-slide-8-database--local-storage-design)
-- [Slide 9: Key Highlights & Takeaways](#-slide-9-key-highlights--takeaways)
+---
+
+## 📑 Table of Contents
+- [✨ Key Features](#-key-features)
+- [🏗️ System Architecture](#️-system-architecture)
+- [🌐 Cloud API & Data Sources](#-cloud-api--data-sources)
+- [🧠 Recommendation & Anti-Drift Engine](#-recommendation--anti-drift-engine)
+- [📱 Core UI & Glassmorphism](#-core-ui--glassmorphism)
+- [🗄️ Database & Storage Model](#️-database--storage-model)
+- [🚀 Getting Started & Build Instructions](#-getting-started--build-instructions)
+- [🧪 Testing & Verification](#-testing--verification)
+- [📄 License & Credits](#-license--credits)
 
 ---
 
-## 🎯 Slide 1: App Overview & Purpose (App Ka Kaam)
+## ✨ Key Features
 
-### 📌 What is Pulse Music?
-**Pulse Music** is a native Android music streaming and local player built entirely using **Android Studio**, **Kotlin**, and **Jetpack Compose (Material Design 3)**.
+### 1. 🎧 Universal Audio Playback (Every Source)
+- **Zero Storage Friction**: Flawlessly resolves and plays audio from any source:
+  - Local filesystem storage (`/storage/emulated/0/...`, MediaStore paths)
+  - Direct file URIs (`file://`) and Storage Access Framework URIs (`content://`)
+  - Offline cached downloads (`localDownloadPath`)
+  - Remote CDN streaming links (`http://`, `https://`)
+- **Auto-Recovery on Expired Tokens**: Intercepts HTTP 403 / IO expired CDN URLs during playback, re-fetches fresh stream tokens from JioSaavn, and resumes smoothly without audio dropouts.
+- **Background Foreground Service**: Powered by **AndroidX Media3 ExoPlayer** and `MediaSessionService` with lockscreen controls, notification media controls, and audio focus ducking.
 
-### 🌟 Core Objectives:
-1. **Hybrid Playback Experience**:
-   - Plays local offline songs stored on the device (`.mp3`, `.m4a`, `.flac`, `.wav`, `.ogg`, `.opus`).
-   - Streams millions of online songs, public playlists, and artist profiles in high-definition audio.
-2. **True Background Playback**:
-   - Runs as a persistent Android foreground media service with lock-screen controls, status-bar notification media session, and audio-focus handling.
-3. **Drift-Free Music Recommendation**:
-   - Features an intelligent, context-aware next-song engine that keeps the listening vibe consistent without jumping between conflicting genres or languages.
-4. **Cloud Backup & Sync**:
-   - Users can log in using their Google account to synchronize their playlists across devices seamlessly.
-5. **Offline Music Downloader**:
-   - Directly downloads streaming tracks into the device's public Music storage for offline access.
+### 2. 🧠 Smart 7-Factor Recommendation Engine
+- **Anti-Drift Session Locking**: Locks into the user's initial mood group (*Romantic*, *Party*, *Sad*, *Chill*); conflicting tracks receive a hard filter score of `-9999.0` and are strictly excluded.
+- **Canonical Deduplication**: Strips track variations (`(Remix)`, `(Lofi Mix)`, `[Acoustic]`, `- Reprise`) so the queue never plays duplicate versions of the same song.
+- **Strict Language & Era Consistency**: Hindi tracks won't jump into cross-regional genres; legacy loops (pre-2010) strictly block modern remix intrusion.
+- **Devotional Content Filter**: Automatically isolates bhajans, aartis, and kirtans from secular pop/party queues.
+
+### 3. 🎨 Glassmorphic UI & Dynamic App Icon
+- **Cyberpunk Dark Theme**: Deep navy background (`#01012B`), neon pink accents (`#FF2A6D`), and electric cyan highlights (`#05D9E8`).
+- **Material You Dynamic Launcher Icon**: Android 13+ adaptive monochrome launcher icon (`ic_launcher_monochrome.xml`) that morphs color palettes dynamically with the user's phone wallpaper.
+- **Live Waveform Visualizer**: `AudioWaveformVisualizer` animates smoothly on active playing songs across Home, Search, Playlists, and Library screens.
+- **Persistent Bottom Navigation**: Main navigation bar remains accessible across all screens, only retracting when the full-screen player modal expands.
+
+### 4. 🔍 Spotify-Style Search & Recent History
+- Real-time debounced search for songs, albums, artists, and playlists.
+- Tap-to-play with live waveform state right inside the search results.
+- Interactive search history: tap previous queries to replay instantly or swipe to remove.
+
+### 5. 📂 Offline Downloads & Queue Management
+- Native high-speed background downloader storing 320 kbps MP4/AAC files in public music storage.
+- Auto-add next songs toggle and queue persistence across app sessions.
 
 ---
 
-## 🏗️ Slide 2: System Architecture (High-Level Design)
+## 🏗️ System Architecture
 
-The app follows the industry-standard **Model-View-ViewModel (MVVM)** clean architecture with unidirectional reactive data flow:
+The application strictly adheres to **MVVM (Model-View-ViewModel)** with Unidirectional Data Flow (UDF) and Clean Architecture principles:
 
+```mermaid
+flowchart TD
+    subgraph UI["Presentation Layer (Jetpack Compose)"]
+        Screens["HomeScreen | SearchScreen | LibraryScreen | SettingsScreen"]
+        PlayerUI["MiniPlayerBar | PlayerScreenModal | AudioWaveformVisualizer"]
+    end
+
+    subgraph ViewModel["State & Business Logic"]
+        VM["MainViewModel (StateFlow & Coroutines)"]
+        Engine["DefaultRecommendationEngine (Scoring & Anti-Drift)"]
+    end
+
+    subgraph Service["Audio & Background Layer"]
+        Ctrl["MusicController"]
+        MS["MusicService (Media3 MediaSessionService)"]
+        Exo["ExoPlayer Audio Pipeline"]
+    end
+
+    subgraph Repositories["Data & Repositories"]
+        JioRepo["JioSaavnRepository"]
+        MediaRepo["MediaStoreScanner"]
+        RoomDB[("Room SQLite DB (AppDatabase)")]
+    end
+
+    Screens -->|User Events| VM
+    PlayerUI -->|Playback Events| VM
+    VM -->|Observe StateFlow| Screens
+    VM -->|Recommend Next| Engine
+    VM -->|Dispatch MediaItem| Ctrl
+    Ctrl --> MS --> Exo
+    VM --> JioRepo & MediaRepo & RoomDB
 ```
-┌────────────────────────────────────────────────────────────────────────┐
-│                        PRESENTATION LAYER (UI)                         │
-│   • Jetpack Compose & Material 3 Design System                         │
-│   • Edge-to-Edge Immersive Theme (Dark Glassmorphism)                  │
-│   • Screens: Home, Player, Search, Library, Playlist Details, Artist   │
-└───────────────────────────────────▲────────────────────────────────────┘
-                                    │  Observes StateFlows / Sends Events
-┌───────────────────────────────────▼────────────────────────────────────┐
-│                           VIEWMODEL LAYER                              │
-│   • MainViewModel (Central State Coordinator)                          │
-│   • Kotlin Coroutines & StateFlow (Reactive UI State Management)       │
-│   • Queue Undo Stack (5-step LIFO memory)                              │
-└───────┬───────────────────────────┬────────────────────────────┬───────┘
-        │                           │                            │
-┌───────▼──────────────┐   ┌────────▼─────────────┐   ┌──────────▼───────┐
-│ RECOMMENDATION ENGINE│   │ MEDIA & BACKGROUND   │   │ REPOSITORY LAYER │
-│ • Scoring Multiplier │   │ • AndroidX Media3    │   │ • MusicRepo      │
-│ • Devotional Filter  │   │ • ExoPlayer Engine   │   │ • JioSaavnRepo   │
-│ • Mood Session Lock  │   │ • MediaSessionService│   │ • PlaylistRepo   │
-│ • Fatigue Analytics  │   │ • MusicDownloader    │   │ • FirestoreRepo  │
-└──────────────────────┘   └──────────────────────┘   └──────────┬───────┘
-                                                                 │
-                                ┌────────────────────────────────┴────────┐
-                                ▼                                         ▼
-                    ┌───────────────────────┐                 ┌───────────────────────┐
-                    │  LOCAL STORAGE LAYER  │                 │ CLOUD & NETWORK APIS  │
-                    │ • SQLite Room DB      │                 │ • JioSaavn REST API   │
-                    │ • DataStore Settings  │                 │ • Last.fm AudioScrob  │
-                    │ • MediaStore & SAF    │                 │ • Musixmatch Lyrics   │
-                    │ • SharedPreferences   │                 │ • Firebase Cloud DB   │
-                    └───────────────────────┘                 └───────────────────────┘
-```
 
 ---
 
-## 🌐 Slide 3: API Ecosystem & Deployment (APIs Kaha Aur Kaise Deploy Hai)
+## 🌐 Cloud API & Data Sources
 
-Pulse Music connects with four specialized cloud services. Here is how and where each backend API is deployed:
-
-| Service / API | Hosting & Deployment Location | Deployment Method & Technology | Access Type |
-| :--- | :--- | :--- | :--- |
-| **JioSaavn Music API** | **Render Cloud Platform**<br>`https://jiosaavn-api-2s17.onrender.com/` | Node.js / Express microservice containerized and deployed as a scalable Web Service on **Render** (Frankfurt/US region). Direct proxy scraper to JioSaavn content delivery network. | Public REST API (No API Key Required) |
-| **Last.fm AudioScrobbler API** | **Last.fm Global Server Network**<br>`https://ws.audioscrobbler.com/2.0/` | Enterprise cloud infrastructure managed by CBS Interactive / Last.fm globally distributed servers. | REST API with API Key & Shared Secret |
-| **Musixmatch Lyrics API** | **Musixmatch Enterprise Cloud**<br>`https://api.musixmatch.com/ws/1.1/` | Multi-region cloud servers managed by Musixmatch, delivering cataloged lyrics and timestamps. | REST API with API Key authentication |
-| **Firebase Cloud Firestore** | **Google Cloud Platform (GCP)**<br>Serverless NoSQL Database | Distributed serverless NoSQL database deployed on Google Cloud Platform, secured via custom Firestore Security Rules. | Firebase SDK with TLS 1.3 encryption |
-| **Firebase Authentication** | **Google Identity Platform**<br>Google Cloud IAM | Managed Google Identity infrastructure integrated with Android 14+ Credential Manager. | OAuth 2.0 / Google IdToken Credential |
+| Data Source | Type | Description |
+| :--- | :--- | :--- |
+| **JioSaavn API** | REST API | Multi-bitrate audio streams (320kbps, 160kbps, 96kbps), song search, playlists, and album art. |
+| **Android MediaStore** | Local Content Provider | Scans device music directories (`/storage/emulated/0/...`) for MP3, FLAC, AAC, WAV, and M4A. |
+| **Storage Access Framework (SAF)** | Local File System | Custom folder picker supporting user-selected SD card/internal directories. |
+| **Room SQLite (`pulse_music_db`)** | Local Database | Caches songs, custom playlists, playback history, track feature vectors, and download metadata. |
+| **Firebase Auth & Firestore** | Cloud Backend | Google Sign-In and cloud playlist synchronization across devices. |
 
 ---
 
-## ⚙️ Slide 4: API Functions & Responsibilities (APIs Ka Kaam)
+## 🧠 Recommendation & Anti-Drift Engine
 
-Each API serves a distinct role in creating the complete music streaming experience:
+Every candidate track is scored in real time using the following weighted multi-factor equation:
 
-### 1. JioSaavn API (`Render Cloud`) — *Primary Audio & Metadata Engine*
-- **Song Search**: Searches millions of tracks by title, artist, or album.
-- **Direct Audio Streaming**: Provides direct CDN audio stream links in multiple qualities (160 kbps standard, 320 kbps high-definition AAC/MP4).
-- **Public Playlists**: Fetches curated top charts (Bollywood Hits, Trending Punjabi, Indie Pop, etc.).
-- **Artist Discography**: Fetches artist bios, verification status, follower count, top singles, and full albums.
-- **Mood & Language Catalog**: Powers mood-based recommendation searches (`"romantic hindi"`, `"party punjabi"`, etc.).
-
-### 2. Last.fm Scrobbler API (`AudioScrobbler Cloud`) — *Music Intelligence & Similarities*
-- **Acoustic Similarity Discovery**: Finds similar tracks based on global community listening behavior.
-- **Top Tags & Genre Classification**: Identifies musical genres, emotional attributes, and language tags.
-- **Cross-Discovery Pipeline**: Helps discover lesser-known songs matching the current artist's vocal texture.
-
-### 3. Musixmatch API (`Musixmatch Cloud`) — *Synchronized Lyrics Engine*
-- **Lyrics Retrieval**: Matches artist and song title to retrieve full verified lyrics for display on the Now Playing screen.
-
-### 4. Firebase Authentication (`Google Cloud Identity`) — *User Profiles*
-- **One-Tap Google Sign-In**: Uses Android Credential Manager for passwordless, secure authentication.
-- **User Identity**: Issues unique user tokens (`uid`) to isolate individual playlist collections.
-
-### 5. Cloud Firestore (`Google Cloud Firestore`) — *Cloud Backup & Personalization*
-- **Cross-Device Playlist Sync**: Stores user-created playlists and exact song sequence orders.
-- **Listening Telemetry**: Records duration, skip category (`INSTANT`, `EARLY`, `COMPLETED`), and completion percentage.
-- **Adaptive Affinity Profiles**: Stores dynamic user weights (exploration factor, favorite artist affinities).
-
----
-
-## 🔄 Slide 5: Complete User & Data Flow (App Ka Working Flow)
-
-### Step 1: App Launch & Authentication
-- App boots with an edge-to-edge dark UI theme.
-- Checks Firebase Auth state:
-  - If logged in, automatically pulls saved playlists from Cloud Firestore into the local Room database.
-  - If first-time user, displays a clean Google Sign-In prompt.
-- Checks Cold-Start state: Prompts user to pick favorite artists and languages to seed the recommendation engine.
-
-### Step 2: Local Storage Access & Scanning
-- Checks runtime storage permissions (`READ_MEDIA_AUDIO` on Android 13+, `READ_EXTERNAL_STORAGE` on older versions).
-- Scans user audio directories via Storage Access Framework (`DocumentFile`) and Android `MediaStore`.
-- Extracts metadata (Title, Artist, Album, Bitrate, Duration, Cover Art) via `MediaMetadataRetriever` and saves to SQLite Room DB.
-
-### Step 3: Discovery & Search Flow
-- Home screen parallelly requests featured playlists and trending songs from the JioSaavn API on Render.
-- Search screen debounces input by 400ms to avoid spamming the network, then searches songs, artists, and playlists simultaneously.
-
-### Step 4: Background Playback & Media3 Architecture
-- When a song is clicked, `MusicController` creates an `androidx.media3.common.MediaItem`.
-- `MusicService` (Foreground Service) streams the track using `ExoPlayer`.
-- Audio attributes are configured for high-quality music playback with automatic audio pause when headphones are unplugged.
-- System notification renders interactive controls (Play, Pause, Skip, Previous, Seekbar).
-
-### Step 5: Auto-Play Next Track Pipeline
-- When the current queue reaches its last song:
-  1. The app extracts the current song's mood, language, release year, and artist.
-  2. Queries 5 sources in parallel (JioSaavn mood+lang, artist songs, Last.fm cross-similarity, and local tracks).
-  3. Deduplicates and caps candidate pool to 50 songs.
-  4. Runs hard pre-scoring gates (Devotional exclusion filter, canonical version check, session skip check).
-  5. Scores candidates using the Multi-Factor Engine.
-  6. Enqueues the winning candidate automatically to provide non-stop playback.
-
-### Step 6: Playlist Management & Firestore Sync
-- Users create, rename, reorder, or delete playlists.
-- Changes are immediately applied to local SQLite Room tables (`playlists`, `playlist_songs`).
-- If signed in, changes are synced asynchronously to Cloud Firestore (`users/{uid}/playlists/{playlistId}`).
-
-### Step 7: Offline Music Downloader
-- Tapping 'Download' routes the stream URL to Android's native `DownloadManager`.
-- File is saved into `Music/PulseMusic/` on device storage.
-- A dynamic `BroadcastReceiver` catches the completion event and marks the track as `isDownloaded = true` in Room DB.
-
----
-
-## 🧠 Slide 6: Smart Recommendation & Anti-Drift Engine
+$$\text{Total Score} = \sum (\text{Factor Score} \times \text{Weight}) - \text{Fatigue Penalty} + \text{Exploration Jitter}$$
 
 ```
                           CANDIDATE TRACK POOL (50 Songs)
@@ -190,6 +134,7 @@ Each API serves a distinct role in creating the complete music streaming experie
              │  • Canonical Key Dedup ("title|artist" normalized)    │
              │  • Active Session Replay & Early Skip Guard           │
              │  • Strict Language Consistency Check                  │
+             │  • Anti-Drift Mood Group Lock                         │
              └───────────────────────────┬───────────────────────────┘
                                          │
                                          ▼
@@ -205,77 +150,89 @@ Each API serves a distinct role in creating the complete music streaming experie
                             WINNING TRACK ENQUEUED
 ```
 
-### 1. Multi-Factor Scoring Formula
-Every candidate track is evaluated with the following weighted breakdown:
-- **30% Mood Consistency**: Matches the emotional group (Party, Romantic, Sad, Chill).
-- **25% Language Consistency**: Keeps the language aligned with the listener's session (e.g. Hindi, Punjabi, English) with soft cross-affinity (Hindi ↔ Urdu).
-- **20% Era Proximity**: Enforces a ±5-year window. Legacy loops (pre-2010) strictly block modern remix intrusion.
-- **10% Acoustic Similarity**: Matches vocal textures (e.g. Arijit Singh / Atif Aslam vocal cluster).
-- **10% Category Consistency**: Keeps movie/soundtrack songs with soundtracks, and independent singles with singles.
-- **5% Time of Day Fit**: Adapts to user habits (morning energy boost, nighttime lo-fi/ambient preference).
-- **Additive User Preference**: Boosts user-favorite artists and cold-start seed selections.
-- **Stochastic Jitter**: Micro-randomization that ensures the playlist never repeats identical sequences.
-
-### 2. Anti-Drift Session Mood Lock
-- When a user manually taps a track, the engine locks the session to that song's mood.
-- Auto-shift logic is disabled so that background auto-play never slowly drifts from a romantic session into high-energy dance or devotional tracks.
-
-### 3. Zero-Tolerance Devotional Filter
-- Employs whole-word regex tokenization across `title`, `album`, and `artist`.
-- Checks against deity keywords (`ram`, `krishna`, `shiva`, `hanuman`, `waheguru`, `vitthal`, etc.) and devotional formats (`bhajan`, `kirtan`, `aarti`, `chalisa`, `abhang`, `stotram`, `gurbani`).
-- Isolates secular and devotional listening without false positives.
-
-### 4. 7-Day Fatigue Penalty
-- Inspects local playback history for the previous 7 days.
-- Automatically docks points (`-0.10f` per play) for songs played repeatedly to encourage freshness.
+- **Weights Breakdown**:
+  - **Mood Consistency (30%)**: Matches the emotional mood group (Party, Romantic, Sad, Chill).
+  - **Language Consistency (25%)**: Strictly preserves session language with soft cross-affinity (Hindi ↔ Urdu).
+  - **Era Proximity (20%)**: Enforces a $\pm 5$-year window around the current track.
+  - **Acoustic Similarity (10%)**: Matches vocal timbres and tempo clusters.
+  - **Category Consistency (10%)**: Pairs movie soundtrack songs with soundtracks, and independent singles with singles.
+  - **User Preference (10%)**: Rewards user ratings, favorite artists, and manual picks.
+  - **Time of Day (5%)**: Adapts to user habits (energetic in afternoon, chill/acoustic at night).
 
 ---
 
-## 📱 Slide 7: Core App Screens & UI Experience
+## 📱 Core UI & Glassmorphism
 
-| Screen Name | Visual Layout & UI Role |
+| Screen | Description |
 | :--- | :--- |
-| **Home Screen** | Curated Discover page with horizontal carousels for featured playlists, trending tracks, quick-play buttons, and hero banners. |
-| **Now Playing Screen** | Full-screen immersive player featuring large rotating album art, animated play/pause buttons, interactive seekbar, volume controls, and real-time synchronized lyrics card. |
-| **Mini Player Bar** | Persistent bottom audio control dock visible across all screens, allowing playback control while navigating other sections. |
-| **Search Screen** | Instant search with segmented tabs (Songs, Playlists, Artists), previous search history chips, and auto-complete suggestions. |
-| **Library Screen** | Toggleable view (List / Grid) of local songs and custom playlists with multiple sort options (Title, Artist, Date Added, Duration). |
-| **Playlist Details** | Header with cover art, track count, total duration, song reordering (drag-and-drop), and add/remove track controls. |
-| **Artist Profile** | Artist banner image, follower statistics, biography snippet, top popular songs, and complete album catalogue. |
-| **Settings Screen** | Storage folder picker, cache management, auto-add queue toggle, queue persistence toggle, and account sign-out. |
+| **Home Screen** | Discover tab with horizontal carousels for trending hits, top charts, and curated playlists. |
+| **Search Screen** | Instant search with debounced queries, live waveform audio previews, and Spotify-style history chips. |
+| **Library Screen** | Grid/List view of local and online playlists, sorting by title, artist, date added, or duration. |
+| **Playlist Details** | Dynamic playlist header, drag-and-drop song reordering, and instant tap-to-toggle playback. |
+| **Artist Profile** | Artist banner, follower statistics, biography snippet, top tracks, and complete discography. |
+| **Player Modal** | Full-screen immersive player featuring rotating vinyl/cover art, waveform visualizer, and lyrics card. |
+| **Mini-Player Bar** | Persistent bottom control dock visible above the navigation bar across all sub-screens. |
+| **Settings Screen** | Folder selector, storage rescan, auto-play next track toggle, and theme switching. |
 
 ---
 
-## 🗄️ Slide 8: Database & Local Storage Design
+## 🗄️ Database & Storage Model
 
 ### Local SQLite (Room Database: `pulse_music_db`)
-1. **`playlists`**: Stores local playlist metadata (name, description, cover image, creation timestamp).
-2. **`playlist_songs`**: Relational join table mapping songs to playlists with explicit position ordering indices.
-3. **`song_metadata`**: Master cache table storing all track attributes (file path, title, artist, album, duration, online stream URL, download status, local file path).
-4. **`playback_history`**: Chronological log of played songs, timestamps, time segments, and canonical song keys for fatigue calculations.
-5. **`search_history`**: Stores the user's recent queries for instant recall.
-
-### Cloud Storage (Google Cloud Firestore)
-- **`users/{uid}/playlists/{playlistId}`**: Remote backup of user playlists with embedded song metadata for instant multi-device restore.
-- **`listening_events/{uid}/events/{eventId}`**: Anonymous playback telemetry for skip analysis.
-- **`user_affinity/{uid}`**: User preference profile containing learned weight multipliers.
+1. **`songs`**: Master cache table storing file paths, titles, artists, albums, durations, stream URLs, download flags, and cover artwork.
+2. **`playlists`**: User playlists with names, descriptions, cover paths, and creation timestamps.
+3. **`playlist_song_cross_ref`**: Relational join table mapping songs to playlists with explicit position ordering indices.
+4. **`playback_history`**: Chronological log of played songs, timestamps, and canonical keys for 7-day fatigue calculations.
+5. **`search_history`**: Stores recent search queries and clicked songs for instant recall.
 
 ---
 
-## 💎 Slide 9: Key Highlights & Takeaways
+## 🚀 Getting Started & Build Instructions
 
-- **Built with Native Android Best Practices**: 100% Kotlin, Jetpack Compose, Material 3, Coroutines, Flow, Room, and Media3 ExoPlayer.
-- **True Cloud Microservice Architecture**: Free public JioSaavn API hosted as a scalable Node.js container on Render cloud platform.
-- **No API Keys Needed for Core Music**: High-quality 320 kbps streaming and downloads work directly out of the box.
-- **Advanced Recommendation System**: Protects user immersion with strict language matching, anti-drift session locking, and devotional filtering.
-- **Cross-Platform Cloud Sync**: Google Sign-In with automated Cloud Firestore synchronization.
-- **Complete Offline Capability**: Both plays local storage audio and downloads online tracks directly to the device.
+### Prerequisites
+- **Android Studio**: Iguana (2023.2.1) or newer / Ladybug
+- **JDK**: OpenJDK 17 or 21
+- **Android SDK**: API 34 (Target: Android 14/15/16)
+- **Build System**: Gradle 8.4+ with Kotlin 1.9.22
+
+### Clone & Build
+```bash
+# 1. Clone the repository
+git clone https://github.com/deepanshu383/pulse-music-.git
+cd pulse-music-
+
+# 2. Build Debug APK
+./gradlew assembleDebug
+
+# 3. Install to connected device via ADB
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+
+# 4. Launch the application
+adb shell am start -n pulse.music/com.example.MainActivity
+```
 
 ---
 
-<div align="center">
+## 🧪 Testing & Verification
 
-**Pulse Music — Native Android Music Experience**  
-*Developed in Android Studio • Powered by Jetpack Compose & Media3*
+The project includes an automated unit test suite covering recommendation math, anti-drift constraints, and deduplication logic:
 
-</div>
+```bash
+# Run all unit tests
+./gradlew testDebugUnitTest
+```
+
+### Test Coverage Highlights
+- `RecommendationEngineTest`: Validates language hard-filtering, era proximity penalties, and multi-version canonical deduplication.
+- `VerificationTest`: Verifies stochastic exploration jitter and zero-tolerance devotional filtering.
+- `EngineStressTest`: 30-step simulation runs across 1,000+ synthetic tracks ensuring zero drift and zero infinite loops.
+- **Test Status**: **31 Tests Completed, 0 Failures (100% Pass Rate)**.
+
+---
+
+## 📄 License & Credits
+
+- Developed with ❤️ by **[Deepanshu](https://github.com/deepanshu383)**.
+- Streaming API powered by the open JioSaavn catalog.
+- Built with **Kotlin**, **Jetpack Compose**, and **AndroidX Media3**.
+- Licensed under the [Apache 2.0 License](LICENSE).
